@@ -26,25 +26,56 @@ RESORTS = [
         "osm_bbox": "(39.15,-120.30,39.27,-120.17)",
         "dem_bbox": (-120.30, 39.15, -120.17, 39.27),  # west,south,east,north
         "color": "steelblue",
+        "dem_resolution_m": 2,
     },
     {
         "name": "Northstar",
         "osm_bbox": "(39.23,-120.16,39.30,-120.09)",
         "dem_bbox": (-120.16, 39.23, -120.09, 39.30),
         "color": "forestgreen",
+        "dem_resolution_m": 2,
     },
     {
         "name": "Sugar Bowl",
         "osm_bbox": "(39.28,-120.38,39.33,-120.32)",
         "dem_bbox": (-120.38, 39.28, -120.32, 39.33),
         "color": "darkorange",
+        "dem_resolution_m": 2,
+    },
+    {
+        "name": "Mount Norquay",
+        "osm_bbox": "(51.19,-115.63,51.23,-115.56)",
+        "dem_bbox": (-115.63, 51.19, -115.56, 51.23),
+        "color": "royalblue",
+        "dem_source": "copernicus",
+        "dem_resolution_m": 30,
+        "spotlio_uuid": "54e0b321fbb08c7c6a51abd24bb5ea158d5c3eb479a189662507fab8e5238836",
+    },
+    {
+        "name": "Sunshine Village",
+        "osm_bbox": "(51.05,-115.82,51.12,-115.73)",
+        "dem_bbox": (-115.82, 51.05, -115.73, 51.12),
+        "color": "goldenrod",
+        "dem_source": "copernicus",
+        "dem_resolution_m": 30,
+        "spotlio_uuid": "c15dc51e0e08ee96c8e192afb2b7c04b073c3d37682dd7d8f8bd319fd76221d5",
+    },
+    {
+        "name": "Lake Louise",
+        "osm_bbox": "(51.40,-116.22,51.47,-116.09)",
+        "dem_bbox": (-116.22, 51.40, -116.09, 51.47),
+        "color": "mediumorchid",
+        "dem_source": "copernicus",
+        "dem_resolution_m": 30,
+        "spotlio_uuid": "1cfc07ddc36438c51a0d0a9c9a4c7fe92f6558c8b2094e35d8c4d1c250e6d2a1",
     },
 ]
 
 SAMPLE_SPACING_M = 10       # meters between sample points along each run
 SMOOTH_POINTS    = 3        # default; used for the static PNG only
 SMOOTH_LEVELS    = [1, 2, 3]  # exported for the web UI (1 = raw, 3 = SteepSeeker)
-GEO_SEGMENT_STEP = 3        # take every Nth 10m point → ~30m map segments
+GEO_SEGMENT_STEP          = 3    # take every Nth 10m point → ~30m map segments
+TRAVERSE_DELTA_THRESHOLD  = 8.0  # flag as potential traverse if face_delta >= this (degrees)
 DEM_RESOLUTION_M = 10       # requested DEM pixel size
 CACHE_DIR        = "cache"  # local cache for all downloaded data
 OVERPASS_URLS    = [
@@ -56,6 +87,9 @@ USGS_WCS_URL     = (
     "https://elevation.nationalmap.gov/arcgis/services/"
     "3DEPElevation/ImageServer/WCSServer"
 )
+COPERNICUS_S3    = "https://copernicus-dem-30m.s3.amazonaws.com"
+SPOTLIO_BASE     = "https://autogen.3dmap.spotlio.com"
+MIN_SPOTLIO_PTS  = 5    # discard Spotlio runs with fewer than this many coordinate points
 
 # ── Cache helpers ─────────────────────────────────────────────────────────────
 
@@ -93,7 +127,9 @@ def load_profiles(name: str, smooth_pts: int) -> list | None:
     return [
         (r["name"],
          np.array(r["dist_m"]) if r["dist_m"] is not None else None,
-         np.array(r["slope_deg"]) if r["slope_deg"] is not None else None)
+         np.array(r["slope_deg"]) if r["slope_deg"] is not None else None,
+         r.get("steepest"),
+         r.get("face_steepest"))     # None if not yet computed
         for r in raw
     ]
 
@@ -102,9 +138,11 @@ def save_profiles(name: str, smooth_pts: int, results: list) -> None:
     path = profiles_cache_path(name, smooth_pts)
     serialisable = [
         {"name": run_name,
-         "dist_m":    dist.tolist() if dist is not None else None,
-         "slope_deg": slope.tolist() if slope is not None else None}
-        for run_name, dist, slope in results
+         "dist_m":        dist.tolist() if dist is not None else None,
+         "slope_deg":     slope.tolist() if slope is not None else None,
+         "steepest":      steepest_override,
+         "face_steepest": face_steep}
+        for run_name, dist, slope, steepest_override, face_steep in results
     ]
     with open(path, "w") as f:
         json.dump(serialisable, f)
@@ -113,23 +151,23 @@ def save_profiles(name: str, smooth_pts: int, results: list) -> None:
 
 # ── DEM download ──────────────────────────────────────────────────────────────
 
-def dem_path_for(name: str) -> str:
+def dem_path_for(name: str, resolution_m: int) -> str:
     os.makedirs(CACHE_DIR, exist_ok=True)
-    return _cache_path(name, "tif")
+    return _cache_path(f"{name}_{resolution_m}m", "tif")
 
 
-def download_dem(bbox_wsen: tuple, output_path: str, resolution_m: int = 10):
-    """
-    Download a USGS 3DEP GeoTIFF via WCS for the given bounding box.
-    bbox_wsen: (west, south, east, north) in WGS-84 degrees.
-    """
+WCS_MAX_PX  = 2000   # safe per-dimension limit for USGS 3DEP WCS
+WCS_RETRIES = 3      # retry count for transient tile errors
+
+
+def _download_dem_tile(bbox_wsen: tuple, output_path: str, resolution_m: int) -> None:
+    """Download a single WCS tile, retrying up to WCS_RETRIES times on error."""
     west, south, east, north = bbox_wsen
     lat_c = (south + north) / 2
     width_m  = (east - west) * 111_000 * math.cos(math.radians(lat_c))
     height_m = (north - south) * 111_000
-    width_px  = max(100, int(width_m  / resolution_m))
-    height_px = max(100, int(height_m / resolution_m))
-
+    width_px  = max(10, int(width_m  / resolution_m))
+    height_px = max(10, int(height_m / resolution_m))
     params = {
         "SERVICE":  "WCS",
         "VERSION":  "1.0.0",
@@ -141,13 +179,175 @@ def download_dem(bbox_wsen: tuple, output_path: str, resolution_m: int = 10):
         "HEIGHT":   height_px,
         "FORMAT":   "GeoTIFF",
     }
-    print(f"  Downloading DEM ({width_px}×{height_px} px) …", flush=True)
-    resp = requests.get(USGS_WCS_URL, params=params, timeout=120, stream=True)
-    resp.raise_for_status()
-    with open(output_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=65536):
-            f.write(chunk)
-    print(f"  Saved → {output_path}")
+    last_err = None
+    for attempt in range(WCS_RETRIES):
+        try:
+            resp = requests.get(USGS_WCS_URL, params=params, timeout=600, stream=True)
+            resp.raise_for_status()
+            with open(output_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    f.write(chunk)
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < WCS_RETRIES - 1:
+                time.sleep(5)
+    raise last_err
+
+
+def download_dem(bbox_wsen: tuple, output_path: str, resolution_m: int = 10):
+    """
+    Download a USGS 3DEP GeoTIFF via WCS for the given bounding box.
+    Tiles requests automatically when the bbox exceeds WCS_MAX_PX per dimension.
+    bbox_wsen: (west, south, east, north) in WGS-84 degrees.
+    """
+    import tempfile
+    from rasterio.merge import merge as rio_merge
+    from rasterio.transform import from_bounds
+
+    west, south, east, north = bbox_wsen
+    lat_c = (south + north) / 2
+    width_m  = (east - west) * 111_000 * math.cos(math.radians(lat_c))
+    height_m = (north - south) * 111_000
+    total_w_px = max(100, int(width_m  / resolution_m))
+    total_h_px = max(100, int(height_m / resolution_m))
+
+    n_cols = math.ceil(total_w_px / WCS_MAX_PX)
+    n_rows = math.ceil(total_h_px / WCS_MAX_PX)
+
+    if n_cols == 1 and n_rows == 1:
+        print(f"  Downloading DEM ({total_w_px}×{total_h_px} px) …", flush=True)
+        _download_dem_tile(bbox_wsen, output_path, resolution_m)
+        print(f"  Saved → {output_path}")
+        return
+
+    print(f"  Downloading DEM ({total_w_px}×{total_h_px} px) in {n_cols}×{n_rows} tiles …", flush=True)
+    lon_step = (east  - west)  / n_cols
+    lat_step = (north - south) / n_rows
+
+    tile_files = []
+    try:
+        for row in range(n_rows):
+            for col in range(n_cols):
+                t_west  = west  + col       * lon_step
+                t_east  = west  + (col + 1) * lon_step
+                t_south = south + row       * lat_step
+                t_north = south + (row + 1) * lat_step
+                tile_bbox = (t_west, t_south, t_east, t_north)
+                tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
+                tmp.close()
+                print(f"    tile ({row},{col}) …", end=" ", flush=True)
+                _download_dem_tile(tile_bbox, tmp.name, resolution_m)
+                print("ok")
+                tile_files.append(tmp.name)
+
+        sources = [rasterio.open(p) for p in tile_files]
+        try:
+            merged_data, merged_transform = rio_merge(sources)
+            src_crs    = sources[0].crs
+            src_nodata = sources[0].nodata
+        finally:
+            for s in sources:
+                s.close()
+
+        nodata_val = src_nodata if src_nodata is not None else -9999.0
+        with rasterio.open(
+            output_path, "w",
+            driver="GTiff", height=merged_data.shape[1], width=merged_data.shape[2],
+            count=1, dtype=merged_data.dtype, crs=src_crs,
+            transform=merged_transform, nodata=nodata_val,
+        ) as dst:
+            dst.write(merged_data)
+        print(f"  Saved → {output_path} ({merged_data.shape[2]}×{merged_data.shape[1]} px)")
+    finally:
+        for p in tile_files:
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+def download_dem_copernicus(bbox_wsen: tuple, output_path: str, resolution_m: int = 10):
+    """
+    Download Copernicus GLO-30 DEM tiles from AWS S3, crop to bbox, and save.
+    Tiles are 1°×1° GeoTIFFs (~28 MB each), cached individually in CACHE_DIR.
+    bbox_wsen: (west, south, east, north) in WGS-84 degrees.
+    """
+    import numpy as np
+    from rasterio.merge import merge as rio_merge
+    from rasterio.warp import reproject, Resampling
+    from rasterio.transform import from_bounds
+
+    west, south, east, north = bbox_wsen
+    lat_c = (south + north) / 2
+    width_m   = (east - west)  * 111_000 * math.cos(math.radians(lat_c))
+    height_m  = (north - south) * 111_000
+    width_px  = max(100, int(width_m  / resolution_m))
+    height_px = max(100, int(height_m / resolution_m))
+
+    # Determine which 1°×1° tiles overlap the bbox
+    lat_indices = range(int(math.floor(south)), int(math.ceil(north)))
+    lon_indices = range(int(math.floor(west)),  int(math.ceil(east)))
+
+    tile_paths = []
+    for lat_idx in lat_indices:
+        for lon_idx in lon_indices:
+            ns  = "N" if lat_idx >= 0 else "S"
+            ew  = "E" if lon_idx >= 0 else "W"
+            name = (f"Copernicus_DSM_COG_10_{ns}{abs(lat_idx):02d}_00"
+                    f"_{ew}{abs(lon_idx):03d}_00_DEM")
+            tile_cache = os.path.join(CACHE_DIR, f"cop30_{lat_idx:+04d}_{lon_idx:+05d}.tif")
+
+            if not os.path.exists(tile_cache):
+                url = f"{COPERNICUS_S3}/{name}/{name}.tif"
+                print(f"  Downloading Copernicus tile {ns}{abs(lat_idx):02d}{ew}{abs(lon_idx):03d} …", flush=True)
+                resp = requests.get(url, timeout=300, stream=True)
+                resp.raise_for_status()
+                with open(tile_cache, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        f.write(chunk)
+                print(f"  Saved → {tile_cache}")
+            else:
+                print(f"  Using cached Copernicus tile: {tile_cache}")
+
+            tile_paths.append(tile_cache)
+
+    # Open tiles, merge if necessary, reproject/crop to bbox, save
+    sources = [rasterio.open(p) for p in tile_paths]
+    try:
+        if len(sources) > 1:
+            merged_data, merged_transform = rio_merge(sources)
+        else:
+            merged_data      = sources[0].read()
+            merged_transform = sources[0].transform
+        src_crs    = sources[0].crs
+        src_nodata = sources[0].nodata
+    finally:
+        for s in sources:
+            s.close()
+
+    nodata_val = src_nodata if src_nodata is not None else -9999.0
+    out_transform = from_bounds(west, south, east, north, width_px, height_px)
+    out_data = np.full((1, height_px, width_px), nodata_val, dtype=np.float32)
+
+    reproject(
+        source=merged_data,
+        destination=out_data,
+        src_transform=merged_transform,
+        src_crs=src_crs,
+        dst_transform=out_transform,
+        dst_crs="EPSG:4326",
+        resampling=Resampling.bilinear,
+        src_nodata=nodata_val,
+        dst_nodata=nodata_val,
+    )
+
+    with rasterio.open(
+        output_path, "w",
+        driver="GTiff", height=height_px, width=width_px,
+        count=1, dtype=np.float32, crs="EPSG:4326",
+        transform=out_transform, nodata=nodata_val,
+    ) as dst:
+        dst.write(out_data)
+    print(f"  Saved → {output_path} ({width_px}×{height_px} px)")
 
 
 def sample_dem(dem_path: str, coords: list[tuple]) -> list[float | None]:
@@ -165,6 +365,90 @@ def sample_dem(dem_path: str, coords: list[tuple]) -> list[float | None]:
             else:
                 elevs.append(v)
     return elevs
+
+
+def compute_face_slope_raster(dem_path: str):
+    """
+    Compute Horn-formula terrain gradient magnitude for the entire DEM.
+    Returns (slope_deg_array, dz_dx_array, dz_dy_array, transform).
+    dz_dx is d(elev)/d(east_meters), dz_dy is d(elev)/d(south_meters).
+    Fall line direction in (east, north) space is (-dz_dx, dz_dy).
+    """
+    with rasterio.open(dem_path) as src:
+        z         = src.read(1).astype(np.float64)
+        nodata    = src.nodata
+        transform = src.transform
+        lat_c     = (src.bounds.bottom + src.bounds.top) / 2
+        res_x_m   = abs(transform.a) * 111_000 * math.cos(math.radians(lat_c))
+        res_y_m   = abs(transform.e) * 111_000
+
+    if nodata is not None:
+        z[z == nodata] = np.nan
+    z[z <= -500] = np.nan
+
+    p = np.pad(z, 1, mode="edge")
+    with np.errstate(invalid="ignore"):
+        dz_dx = ((p[:-2, 2:] + 2*p[1:-1, 2:] + p[2:, 2:]) -
+                 (p[:-2, :-2] + 2*p[1:-1, :-2] + p[2:, :-2])) / (8 * res_x_m)
+        dz_dy = ((p[2:, :-2] + 2*p[2:, 1:-1] + p[2:, 2:]) -
+                 (p[:-2, :-2] + 2*p[:-2, 1:-1] + p[:-2, 2:])) / (8 * res_y_m)
+        slope = np.degrees(np.arctan(np.sqrt(dz_dx**2 + dz_dy**2)))
+
+    slope_arr = np.clip(slope, 0.0, 70.0).astype(np.float32)
+    return slope_arr, dz_dx.astype(np.float32), dz_dy.astype(np.float32), transform
+
+
+_COS_45 = math.cos(math.radians(45))
+
+def sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr, transform,
+                       coords: list[tuple]) -> list[float | None]:
+    """Sample face-slope degrees (Horn gradient) at (lat, lon) pairs.
+
+    Points where the terrain fall line is >45° from the travel direction
+    return None — those slopes are beside the skier, not underfoot.
+    Fall line in (east, north): (-dz_dx, dz_dy) per the Horn convention used here.
+    """
+    nrows, ncols = face_arr.shape
+    n = len(coords)
+    results = []
+    for i, (lat, lon) in enumerate(coords):
+        col_i = int((lon - transform.c) / transform.a)
+        row_i = int((lat - transform.f) / transform.e)
+        if not (0 <= row_i < nrows and 0 <= col_i < ncols):
+            results.append(None)
+            continue
+        v = float(face_arr[row_i, col_i])
+        if np.isnan(v):
+            results.append(None)
+            continue
+
+        if n <= 1:
+            results.append(v)
+            continue
+
+        lat1, lon1 = coords[max(0, i - 1)]
+        lat2, lon2 = coords[min(n - 1, i + 1)]
+        cos_lat = math.cos(math.radians((lat1 + lat2) / 2))
+        travel_e = (lon2 - lon1) * cos_lat
+        travel_n = lat2 - lat1
+        travel_mag = math.sqrt(travel_e ** 2 + travel_n ** 2)
+        if travel_mag < 1e-10:
+            results.append(v)
+            continue
+
+        dx = float(dz_dx_arr[row_i, col_i])
+        dy = float(dz_dy_arr[row_i, col_i])
+        fall_e = -dx
+        fall_n = dy
+        fall_mag = math.sqrt(fall_e ** 2 + fall_n ** 2)
+        if fall_mag < 1e-10:
+            results.append(v)
+            continue
+
+        cos_theta = abs(fall_e * travel_e + fall_n * travel_n) / (fall_mag * travel_mag)
+        results.append(v if cos_theta >= _COS_45 else None)
+    return results
+
 
 # ── OSM fetching ──────────────────────────────────────────────────────────────
 
@@ -226,6 +510,62 @@ def fetch_runs(resort_name: str, bbox: str) -> list[dict]:
 
     save_json_cache(resort_name, runs)
     return runs
+
+# ── Spotlio supplement ────────────────────────────────────────────────────────
+
+def _norm_name(s: str) -> str:
+    return s.lower().replace("'", "").replace("\u2019", "").replace("-", " ").strip()
+
+
+def fetch_spotlio_supplement(resort_name: str, uuid: str, osm_runs: list[dict]) -> list[dict]:
+    """
+    Fetch runs from the Spotlio API that are missing from osm_runs.
+    Returns run dicts in the same format as fetch_runs() output.
+    Results are cached in cache/{name}_spotlio.json.
+    """
+    cache_key = f"{resort_name.replace(' ', '_')}_spotlio"
+    cached = load_json_cache(cache_key)
+    if cached is not None:
+        print(f"  Using cached Spotlio supplement ({len(cached)} runs)")
+        return cached
+
+    print("  Fetching Spotlio supplement …", flush=True)
+    resp = requests.get(
+        f"{SPOTLIO_BASE}/api/touristic-objects?resortUuid={uuid}",
+        timeout=30,
+    )
+    resp.raise_for_status()
+    items = resp.json().get("data", [])
+
+    osm_norm = {_norm_name(r["name"]) for r in osm_runs}
+
+    supplement = []
+    skipped_sparse = 0
+    for item in items:
+        if not (isinstance(item.get("type"), dict) and item["type"].get("name") == "slope"):
+            continue
+        name   = item.get("name", "").strip()
+        coords = item.get("map_coordinates") or []
+        if _norm_name(name) in osm_norm:
+            continue                          # already covered by OSM
+        if len(coords) < MIN_SPOTLIO_PTS:
+            skipped_sparse += 1
+            continue
+        # Spotlio stores [lon, lat]; pipeline expects (lat, lon)
+        run_coords = [(lat, lon) for lon, lat in coords]
+        supplement.append({
+            "id":             f"spotlio:{item['uuid']}",
+            "name":           name,
+            "osm_difficulty": "unknown",      # classified from slope data
+            "coords":         run_coords,
+        })
+
+    if skipped_sparse:
+        print(f"    skipped {skipped_sparse} Spotlio runs with <{MIN_SPOTLIO_PTS} points")
+    print(f"    {len(supplement)} Spotlio runs added")
+    save_json_cache(cache_key, supplement)
+    return supplement
+
 
 # ── Run stitching ─────────────────────────────────────────────────────────────
 
@@ -353,6 +693,100 @@ def stitch_runs(runs: list[dict]) -> list[dict]:
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
 
+def _point_in_polygon(lat, lon, ring):
+    """Ray-casting point-in-polygon test."""
+    inside, j = False, len(ring) - 1
+    for i in range(len(ring)):
+        ri, ci = ring[i]
+        rj, cj = ring[j]
+        if ((ci > lon) != (cj > lon)) and \
+                (lat < (rj - ri) * (lon - ci) / (cj - ci) + ri):
+            inside = not inside
+        j = i
+    return inside
+
+
+def profile_area(coords, dem_path):
+    """
+    For an area run (polygon without the closing duplicate), sample a 10m grid
+    inside the polygon and follow the steepest-descent path from the highest
+    interior point for the profile.  Also compute the globally-optimal steepest
+    30 m pitch via DP (see _dp_steepest_30m_area).
+
+    Returns (pts, elevs, dp_steepest) where dp_steepest is the DP-computed
+    steepest value.  Returns (None, None, None) if the area is too small.
+    """
+    lats = [c[0] for c in coords]
+    lons = [c[1] for c in coords]
+    lat_min, lat_max = min(lats), max(lats)
+    lon_min, lon_max = min(lons), max(lons)
+    lat_c = (lat_min + lat_max) / 2
+
+    m_per_lat = 111_000
+    m_per_lon = 111_000 * math.cos(math.radians(lat_c))
+    dlat = SAMPLE_SPACING_M / m_per_lat
+    dlon = SAMPLE_SPACING_M / m_per_lon
+
+    # Build index grid
+    lat_steps, v = [], lat_min
+    while v <= lat_max + dlat:
+        lat_steps.append(v); v += dlat
+    lon_steps, v = [], lon_min
+    while v <= lon_max + dlon:
+        lon_steps.append(v); v += dlon
+
+    grid   = {}   # (ri, ci) -> (lat, lon)
+    pts_list = []
+    idx_list = []
+    for ri, lat in enumerate(lat_steps):
+        for ci, lon in enumerate(lon_steps):
+            if _point_in_polygon(lat, lon, coords):
+                grid[(ri, ci)] = (lat, lon)
+                idx_list.append((ri, ci))
+                pts_list.append((lat, lon))
+
+    if len(pts_list) < 5:
+        return None, None, None
+
+    elevs_list = sample_dem(dem_path, pts_list)
+    elev_grid  = {idx: e for idx, e in zip(idx_list, elevs_list)
+                  if e is not None and e > 0}
+
+    if len(elev_grid) < 5:
+        return None, None, None
+
+    # Greedy steepest-descent from highest interior point
+    start = max(elev_grid, key=lambda k: elev_grid[k])
+    path, visited = [start], {start}
+    DIRS = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+
+    while True:
+        ri, ci = path[-1]
+        cur_pt, cur_e = grid[(ri, ci)], elev_grid[(ri, ci)]
+        best, best_slope = None, 0.0
+        for dr, dc in DIRS:
+            nbr = (ri + dr, ci + dc)
+            if nbr in visited or nbr not in elev_grid:
+                continue
+            d = haversine(*cur_pt, *grid[nbr])
+            if d == 0:
+                continue
+            s = (cur_e - elev_grid[nbr]) / d
+            if s > best_slope:
+                best_slope, best = s, nbr
+        if best is None:
+            break
+        path.append(best); visited.add(best)
+
+    if len(path) < 3:
+        return None, None, None
+
+    pts         = [grid[i] for i in path]
+    elevs       = [elev_grid[i] for i in path]
+    dp_steepest = _dp_steepest_30m_area(elev_grid, grid)
+    return pts, elevs, dp_steepest
+
+
 def haversine(lat1, lon1, lat2, lon2) -> float:
     R = 6_371_000
     phi1, phi2 = radians(lat1), radians(lat2)
@@ -442,6 +876,104 @@ def steepest_30m(slope_deg: np.ndarray) -> float:
     rolling = np.convolve(down, np.ones(3) / 3.0, mode="valid")
     return float(np.max(rolling))
 
+
+def face_steepest_30m(face_slopes: list) -> float:
+    """Max 3-point rolling mean of per-point face slopes (Horn gradient magnitude).
+    Same 30 m window as steepest_30m but uses terrain steepness, not run direction."""
+    valid = np.array([s for s in face_slopes if s is not None and s > 0], dtype=float)
+    if len(valid) < 3:
+        return float(np.max(valid)) if len(valid) > 0 else 0.0
+    return float(np.max(np.convolve(valid, np.ones(3) / 3.0, mode="valid")))
+
+
+def get_steepest(slope_deg: np.ndarray | None, override: float | None) -> float:
+    """Return the steepest-30m value, preferring an explicit override (used for
+    area runs where the DP-computed value is more accurate than the single
+    greedy-path profile)."""
+    if override is not None:
+        return override
+    if slope_deg is None:
+        return 0.0
+    return steepest_30m(slope_deg)
+
+
+def _dp_steepest_30m_area(elev_grid: dict, grid: dict) -> float:
+    """Compute steepest_30m for an area by searching over ALL possible 3-step
+    downhill paths in the area grid using dynamic programming.
+
+    The greedy-descent approach (used for the profile path) starts from a single
+    point and can miss the steepest 30 m pitch if it lies in a different part of
+    the area.  This DP finds the globally optimal pitch in O(8 * n) time.
+
+    Args:
+        elev_grid: {(ri, ci): elevation_m} for valid interior cells.
+        grid:      {(ri, ci): (lat, lon)} for those same cells.
+    Returns:
+        Maximum mean slope (degrees) over any 3-step strictly-downhill path.
+    """
+    DIRS = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+
+    if len(elev_grid) < 4:
+        return 0.0
+
+    # Process cells high → low so that when we visit cell C, all cells higher
+    # than C (its potential predecessors) have already been processed.
+    sorted_cells = sorted(elev_grid.keys(), key=lambda k: elev_grid[k], reverse=True)
+
+    # best_sum_k[cell] = maximum sum of slopes for a k-step strictly-downhill
+    # path that ENDS at `cell`.
+    best1: dict = {}
+    best2: dict = {}
+    best3: dict = {}
+
+    for cell in sorted_cells:
+        ri, ci = cell
+        e_cell  = elev_grid[cell]
+        pt_cell = grid[cell]
+
+        s1_best = s2_best = s3_best = -math.inf
+
+        for dr, dc in DIRS:
+            prev = (ri + dr, ci + dc)
+            if prev not in elev_grid:
+                continue
+            e_prev = elev_grid[prev]
+            if e_prev <= e_cell:          # must descend (strictly downhill)
+                continue
+
+            d = haversine(*grid[prev], *pt_cell)
+            if d == 0:
+                continue
+            slope = min(55.0, math.degrees(math.atan2(e_prev - e_cell, d)))
+
+            if slope > s1_best:
+                s1_best = slope
+
+            if prev in best1:
+                v = best1[prev] + slope
+                if v > s2_best:
+                    s2_best = v
+
+            if prev in best2:
+                v = best2[prev] + slope
+                if v > s3_best:
+                    s3_best = v
+
+        if s1_best > -math.inf:
+            best1[cell] = s1_best
+        if s2_best > -math.inf:
+            best2[cell] = s2_best
+        if s3_best > -math.inf:
+            best3[cell] = s3_best
+
+    if best3:
+        return max(best3.values()) / 3.0
+    if best2:
+        return max(best2.values()) / 2.0
+    if best1:
+        return max(best1.values())
+    return 0.0
+
 # ── Plotting ──────────────────────────────────────────────────────────────────
 
 RUN_H_IN  = 0.9    # inches per run row
@@ -463,12 +995,12 @@ def _tier(deg: float) -> int:
 
 def _sorted_with_separators(results: list) -> list:
     """Sort runs by steepest section descending; insert None at tier breaks."""
-    valid = [(n, d, s) for n, d, s in results if s is not None]
-    valid.sort(key=lambda x: steepest_30m(x[2]), reverse=True)
+    valid = [(n, d, s, o, f) for n, d, s, o, f in results if s is not None]
+    valid.sort(key=lambda x: get_steepest(x[2], x[3]), reverse=True)
 
     out, prev_tier = [], None
     for run in valid:
-        t = _tier(steepest_30m(run[2]))
+        t = _tier(get_steepest(run[2], run[3]))
         if prev_tier is not None and t != prev_tier:
             out.append(None)          # tier separator
         out.append(run)
@@ -489,7 +1021,7 @@ def build_figure(all_results: dict) -> plt.Figure:
     # Shared x-limit
     all_dists = [d[-1] for rows in col_rows.values()
                  for item in rows if item is not None
-                 for _, d, _ in [item]]
+                 for _, d, *_ in [item]]
     x_max = max(all_dists) / 1000 * 1.05
 
     # ── Absolute layout in inches ────────────────────────────────────────────
@@ -552,8 +1084,8 @@ def build_figure(all_results: dict) -> plt.Figure:
                 first_ax = ax
                 ax.set_title(rname, fontsize=10, fontweight="bold", pad=3)
 
-            run_name, dist_m, slope_deg = item
-            steepest = steepest_30m(slope_deg)
+            run_name, dist_m, slope_deg, steepest_override, _face_steep = item
+            steepest = get_steepest(slope_deg, steepest_override)
 
             ax.fill_between(dist_m / 1000, slope_deg, 0,
                             where=(slope_deg >= 0),
@@ -626,8 +1158,8 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
                 if item is None:
                     runs_out.append(None)
                     continue
-                run_name, dist_m, slope_deg = item
-                steepest = steepest_30m(slope_deg)
+                run_name, dist_m, slope_deg, steepest_override, face_steep = item
+                steepest = get_steepest(slope_deg, steepest_override)
 
                 n    = len(dist_m)
                 step = max(1, n // max_points)
@@ -641,6 +1173,11 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
                     "length_km": round(float(dist_m[-1]) / 1000, 2),
                     "profile":   profile,
                 }
+                if face_steep is not None:
+                    delta = face_steep - steepest
+                    run_entry["face_steepest"] = round(face_steep, 1)
+                    run_entry["face_delta"]    = round(delta, 1)
+                    run_entry["is_traverse"]   = delta >= TRAVERSE_DELTA_THRESHOLD
                 osm_id = osm_id_by_name.get(run_name)
                 if osm_id is not None:
                     run_entry["osm_id"] = osm_id
@@ -710,9 +1247,36 @@ out skel qt;
     return lifts
 
 
+def stitch_lifts(lifts: list[dict]) -> list[dict]:
+    """Merge same-name lift OSM ways into a single LineString (same logic as runs)."""
+    from collections import defaultdict
+    by_name: dict[str, list] = defaultdict(list)
+    for l in lifts:
+        by_name[l["name"]].append(l)
+
+    out = []
+    for name, group in by_name.items():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        chain = _try_chain(group)
+        if chain is None:
+            # Can't chain — keep the longest segment, drop the rest
+            out.append(max(group, key=lambda g: len(g["coords"])))
+            continue
+        merged: list = []
+        for i, (w, fwd) in enumerate(chain):
+            coords = w["coords"] if fwd else list(reversed(w["coords"]))
+            merged.extend(coords if i == 0 else coords[1:])
+        print(f"    stitched {len(group)}× lift '{name}'")
+        out.append({"name": name, "type": group[0]["type"], "coords": merged})
+    return out
+
+
 def export_lifts_geo_json(resort: dict, lifts: list) -> None:
     slug = resort["name"].lower().replace(" ", "_")
     path = os.path.join(UI_DATA_DIR, f"{slug}_lifts.json")
+    lifts = stitch_lifts(lifts)
     features = []
     for lift in lifts:
         coords = [[round(lon, 6), round(lat, 6)] for lat, lon in lift["coords"]]
@@ -729,60 +1293,160 @@ def export_lifts_geo_json(resort: dict, lifts: list) -> None:
 # ── Geo JSON export (for map view) ───────────────────────────────────────────
 
 def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s3: list) -> None:
-    """Write a slope-coloured GeoJSON file for the resort map view."""
+    """Write a slope-coloured GeoJSON file for the resort map view.
+
+    Slope coloring uses the same smooth=3 methodology as the profile data
+    (3-point elevation smoothing → 10m slopes → subsample every 3rd point)
+    so map colors are consistent with the steepest-degree values in the sidebar.
+    """
     slug = resort["name"].lower().replace(" ", "_")
     path = os.path.join(UI_DATA_DIR, f"{slug}_geo.json")
 
-    steepest_by_name = {
-        run_name: steepest_30m(slope)
-        for run_name, _, slope in profiles_s3
-        if slope is not None
-    }
-    osm_id_by_name = {r["name"]: r["id"] for r in runs_meta}
+    # Use ordered queues per name so duplicate-named runs each get their own
+    # steepest value rather than the last one overwriting all previous entries.
+    from collections import defaultdict as _dd
+    steepest_queue    = _dd(list)
+    face_steep_queue  = _dd(list)
+    for run_name, _, slope, override, face_steep in profiles_s3:
+        steepest_queue[run_name].append(
+            get_steepest(slope, override) if slope is not None else 0.0
+        )
+        face_steep_queue[run_name].append(face_steep)
 
-    step = GEO_SEGMENT_STEP
+    osm_id_queue      = _dd(list)
+    orig_coords_queue = _dd(list)
+    for r in runs_meta:
+        osm_id_queue[r["name"]].append(r["id"])
+        orig_coords_queue[r["name"]].append(r["coords"])
+
+    def _pop_steepest(name):
+        q = steepest_queue.get(name, [])
+        return q.pop(0) if q else 0.0
+
+    def _pop_face_steep(name):
+        q = face_steep_queue.get(name, [])
+        return q.pop(0) if q else None
+
+    def _pop_osm_id(name):
+        q = osm_id_queue.get(name, [])
+        return q.pop(0) if q else None
+
+    def _pop_coords(name):
+        q = orig_coords_queue.get(name, [])
+        return q.pop(0) if q else []
+
     features = []
 
-    for run_name, pts_10m, elevs_10m in raw_samples:
-        indices = list(range(0, len(pts_10m), step))
-        if indices[-1] != len(pts_10m) - 1:
-            indices.append(len(pts_10m) - 1)
+    for run_name, pts_10m, elevs_10m, _dp, face_slp in raw_samples:
+        steepest    = _pop_steepest(run_name)
+        _pop_face_steep(run_name)   # consume queue entry; recompute from direction-filtered slp
+        osm_id      = _pop_osm_id(run_name)
+        coords_orig = _pop_coords(run_name)
 
-        pts_s   = [pts_10m[i]   for i in indices]
-        elevs_s = [elevs_10m[i] for i in indices]
+        face_steep  = face_steepest_30m(face_slp) if face_slp is not None else None
+        face_delta  = (face_steep - steepest) if face_steep is not None else None
+        is_traverse = face_delta is not None and face_delta >= TRAVERSE_DELTA_THRESHOLD
 
-        valid = [(p, e) for p, e in zip(pts_s, elevs_s) if e is not None]
-        if len(valid) < 3:
+        # Area runs: export polygon boundary from original OSM coords
+        if len(coords_orig) > 2 and coords_orig[0] == coords_orig[-1]:
+            ring = [[round(lon, 6), round(lat, 6)] for lat, lon in coords_orig]
+            props = {
+                "name":     run_name,
+                "steepest": round(steepest, 1),
+                "osm_id":   osm_id,
+                "is_area":  True,
+                "slopes":   [],
+            }
+            if face_steep is not None:
+                props["face_steepest"] = round(face_steep, 1)
+                props["is_traverse"]   = is_traverse
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": props,
+            })
             continue
-        pts_v, elevs_v = zip(*valid)
-        elevs_arr = np.array(elevs_v, dtype=float)
+
+        # Drop None elevations; carry face slopes through the same filter
+        face_list = face_slp if face_slp is not None else [None] * len(pts_10m)
+        valid = [(p, e, f) for p, e, f in zip(pts_10m, elevs_10m, face_list)
+                 if e is not None]
+        if len(valid) < 5:
+            continue
+        pts_v     = tuple(x[0] for x in valid)
+        elevs_arr = np.array([x[1] for x in valid], dtype=float)
+        face_v    = [x[2] for x in valid]
 
         # Orient top-to-bottom
         if elevs_arr[0] < elevs_arr[-1]:
             pts_v     = pts_v[::-1]
             elevs_arr = elevs_arr[::-1]
+            face_v    = face_v[::-1]
 
-        seg_slopes = []
-        for i in range(len(pts_v) - 1):
-            d = haversine(*pts_v[i], *pts_v[i + 1])
+        # Smooth elevation with 3-point window (matches smooth=3 / SteepSeeker)
+        kernel = np.ones(3) / 3.0
+        half   = 1
+        elev_s = np.convolve(elevs_arr, kernel, mode="valid")   # len - 2
+        pts_s  = pts_v[half: half + len(elev_s)]                # aligned slice
+
+        # Compute 10m directional slopes from smoothed elevation
+        slopes_10m = []
+        for i in range(len(pts_s) - 1):
+            d  = haversine(*pts_s[i], *pts_s[i + 1])
             if d == 0:
-                seg_slopes.append(0.0)
+                slopes_10m.append(0.0)
                 continue
-            dh = float(elevs_arr[i] - elevs_arr[i + 1])   # positive = downhill
+            dh = float(elev_s[i] - elev_s[i + 1])
             deg = math.degrees(math.atan2(abs(dh), d)) * (1 if dh >= 0 else -1)
-            seg_slopes.append(round(max(-5.0, min(55.0, deg)), 1))
+            slopes_10m.append(max(-5.0, min(55.0, deg)))
 
-        coords = [[round(lon, 6), round(lat, 6)] for lat, lon in pts_v]
+        slopes_arr    = np.array(slopes_10m)
+        slopes_smooth = (np.convolve(slopes_arr, kernel, mode="same")
+                         if len(slopes_arr) >= 3 else slopes_arr)
+
+        # Face slopes: per-point Horn gradient, smoothed and aligned to slopes_smooth
+        face_arr_v = np.array([f if f is not None else np.nan for f in face_v], dtype=float)
+        if len(face_arr_v) >= 3:
+            face_smooth = np.convolve(face_arr_v, kernel, mode="same")
+        else:
+            face_smooth = face_arr_v
+        face_smooth = np.clip(np.nan_to_num(face_smooth, nan=0.0), 0.0, 55.0)
+        face_trim   = face_smooth[half: half + len(slopes_smooth)]  # align lengths
+
+        # Face slopes floored by line slopes: filtered-out face samples (zeroed by direction
+        # filter) fall back to the directional value rather than pulling the segment down.
+        use_face = face_slp is not None and len(face_trim) == len(slopes_smooth)
+        display_slopes = np.maximum(face_trim, slopes_smooth) if use_face else slopes_smooth
+
+        # Subsample: color each 30m segment by peak within window
+        step    = GEO_SEGMENT_STEP
+        indices = list(range(0, len(display_slopes), step))
+        seg_slopes = [
+            round(float(np.max(display_slopes[i: i + step])), 1)
+            for i in indices
+        ]
+        seg_line_slopes = [
+            round(float(np.max(slopes_smooth[i: i + step])), 1)
+            for i in indices
+        ]
+        coord_pts = [pts_s[i] for i in indices] + [pts_s[-1]]
+        coords    = [[round(lon, 6), round(lat, 6)] for lat, lon in coord_pts]
+
+        props = {
+            "name":        run_name,
+            "steepest":    round(steepest, 1),
+            "osm_id":      osm_id,
+            "slopes":      seg_slopes,       # face steepness per segment (line if no face data)
+            "line_slopes": seg_line_slopes,  # directional steepness per segment
+        }
+        if face_steep is not None:
+            props["face_steepest"] = round(face_steep, 1)
+            props["is_traverse"]   = is_traverse
 
         features.append({
             "type": "Feature",
             "geometry": {"type": "LineString", "coordinates": coords},
-            "properties": {
-                "name":     run_name,
-                "steepest": round(steepest_by_name.get(run_name, 0.0), 1),
-                "osm_id":   osm_id_by_name.get(run_name),
-                "slopes":   seg_slopes,
-            },
+            "properties": props,
         })
 
     geojson = {
@@ -822,9 +1486,13 @@ def main():
         print(f"\n▶ {name}")
 
         # 1. DEM (download once, cache locally)
-        tif = dem_path_for(name)
+        res_m = resort["dem_resolution_m"]
+        tif = dem_path_for(name, res_m)
         if not os.path.exists(tif):
-            download_dem(resort["dem_bbox"], tif, DEM_RESOLUTION_M)
+            if resort.get("dem_source") == "copernicus":
+                download_dem_copernicus(resort["dem_bbox"], tif, res_m)
+            else:
+                download_dem(resort["dem_bbox"], tif, res_m)
         else:
             print(f"  Using cached DEM: {tif}")
 
@@ -835,9 +1503,14 @@ def main():
         runs = stitch_runs(runs)
         print(f"  {len(runs)} runs after stitching")
 
+        if resort.get("spotlio_uuid"):
+            extra = fetch_spotlio_supplement(name, resort["spotlio_uuid"], runs)
+            runs = runs + extra
+
         # 3. For each smooth level, load or compute profiles.
         #    DEM is sampled once (lazily) if any level needs computing.
-        raw_samples = None   # (pts, elevs) per run — loaded on demand
+        raw_samples = None   # (name, pts, elevs, dp_steepest, face_slp) per run
+        face_arr    = None   # face-slope raster, computed alongside raw_samples
 
         for s in SMOOTH_LEVELS:
             results = load_profiles(name, s)
@@ -846,16 +1519,36 @@ def main():
             else:
                 if raw_samples is None:
                     print("  Sampling DEM …", flush=True)
+                    face_arr, dz_dx_arr, dz_dy_arr, face_transform = compute_face_slope_raster(tif)
                     raw_samples = []
                     for run in runs:
-                        pts   = interpolate_run(run["coords"], SAMPLE_SPACING_M)
-                        elevs = sample_dem(tif, pts)
-                        raw_samples.append((run["name"], pts, elevs))
+                        c = run["coords"]
+                        is_area = len(c) > 2 and c[0] == c[-1]
+                        if is_area:
+                            pts, elevs, dp_steepest = profile_area(c[:-1], tif)
+                            if pts is None:          # fallback to perimeter
+                                pts         = interpolate_run(c, SAMPLE_SPACING_M)
+                                elevs       = sample_dem(tif, pts)
+                                dp_steepest = None
+                        else:
+                            pts         = interpolate_run(c, SAMPLE_SPACING_M)
+                            elevs       = sample_dem(tif, pts)
+                            dp_steepest = None
+                        face_slp = (sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr,
+                                                       face_transform, pts)
+                                    if pts is not None else None)
+                        raw_samples.append((run["name"], pts, elevs, dp_steepest, face_slp))
+
+                    face_steep_by_run = {
+                        run_name: face_steepest_30m(face_slp) if face_slp is not None else None
+                        for run_name, _, _, _, face_slp in raw_samples
+                    }
 
                 results = []
-                for run_name, pts, elevs in raw_samples:
+                for run_name, pts, elevs, dp_steepest, _face_slp in raw_samples:
                     dist, slope = slope_profile(pts, elevs, s)
-                    results.append((run_name, dist, slope))
+                    results.append((run_name, dist, slope, dp_steepest,
+                                    face_steep_by_run.get(run_name)))
                     status = "ok" if dist is not None else "skip"
                     print(f"    s={s}  {run_name[:38]:<38}  [{status}]")
                 save_profiles(name, s, results)
@@ -867,11 +1560,23 @@ def main():
         if not os.path.exists(geo_out):
             if raw_samples is None:
                 print("  Sampling DEM for geo export …", flush=True)
+                face_arr, dz_dx_arr, dz_dy_arr, face_transform = compute_face_slope_raster(tif)
                 raw_samples = []
                 for run in runs:
-                    pts   = interpolate_run(run["coords"], SAMPLE_SPACING_M)
-                    elevs = sample_dem(tif, pts)
-                    raw_samples.append((run["name"], pts, elevs))
+                    c = run["coords"]
+                    is_area = len(c) > 2 and c[0] == c[-1]
+                    if is_area:
+                        pts, elevs, dp_steepest = profile_area(c[:-1], tif)
+                        if pts is None:
+                            pts         = interpolate_run(c, SAMPLE_SPACING_M)
+                            elevs       = sample_dem(tif, pts)
+                    else:
+                        pts   = interpolate_run(run["coords"], SAMPLE_SPACING_M)
+                        elevs = sample_dem(tif, pts)
+                    face_slp = (sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr,
+                                                   face_transform, pts)
+                                if pts is not None else None)
+                    raw_samples.append((run["name"], pts, elevs, None, face_slp))
             export_geo_json(resort, runs, raw_samples,
                             all_results_by_smooth[3].get(name, []))
         else:
@@ -890,8 +1595,8 @@ def main():
     # 6. Export JSON for the web UI
     export_for_ui(all_results_by_smooth)
 
-    # 7. Plot (only when all resorts were processed)
-    if len(resorts) < len(RESORTS):
+    # 7. Plot (only when exactly 2 resorts — build_figure is hardcoded for that)
+    if len(resorts) != 2:
         return
     fig = build_figure(all_results_by_smooth[SMOOTH_POINTS])
 
