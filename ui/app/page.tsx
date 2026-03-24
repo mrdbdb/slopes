@@ -323,7 +323,6 @@ export default function MapPage() {
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0 text-sm">
         <span className="font-bold text-gray-800">SlopesDB</span>
-        <Link href="/chart" className="text-xs text-gray-400 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5">Compare →</Link>
 
         <select
           value={slug}
@@ -342,9 +341,17 @@ export default function MapPage() {
           {tierFilterContent}
         </div>
 
-        {/* Desktop: settings */}
-        <div className="hidden md:flex ml-auto items-center gap-2 border-l border-gray-200 pl-3">
-          {settingsContent}
+        {/* Desktop: compare + settings */}
+        <div className="hidden md:flex ml-auto items-center gap-2">
+          <Link href="/chart" className="p-1.5 rounded border border-gray-200 text-gray-400 hover:text-gray-700 transition-colors" title="Compare resorts">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <rect x="1" y="3" width="5" height="10" rx="0.5" />
+              <rect x="10" y="3" width="5" height="10" rx="0.5" />
+            </svg>
+          </Link>
+          <div className="flex items-center gap-2 border-l border-gray-200 pl-3">
+            {settingsContent}
+          </div>
         </div>
 
         {/* Mobile: icon buttons */}
