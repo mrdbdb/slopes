@@ -2,7 +2,7 @@
   "name": "SlopesDB",
   "short_name": "SlopesDB",
   "description": "Ski run steepness profiles",
-  "start_url": "/map",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1f2937",
