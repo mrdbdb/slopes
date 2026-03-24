@@ -10,6 +10,7 @@ interface Props {
   onHover: (name: string | null) => void
   onClick: (name: string) => void
   maxDist: number
+  mounted: boolean
 }
 
 const TIER_LABELS: Record<number, string> = {
@@ -19,7 +20,7 @@ const TIER_LABELS: Record<number, string> = {
   0:  "Beginner <18°",
 }
 
-export default function ResortColumn({ data, filterTier, highlighted, onHover, onClick, maxDist }: Props) {
+export default function ResortColumn({ data, filterTier, highlighted, onHover, onClick, maxDist, mounted }: Props) {
   const visible = data.runs.filter(run => {
     if (run === null) return true
     if (!filterTier) return true
@@ -58,6 +59,7 @@ export default function ResortColumn({ data, filterTier, highlighted, onHover, o
               onHover={onHover}
               onClick={onClick}
               maxDist={maxDist}
+              mounted={mounted}
             />
           )
         )}

@@ -491,7 +491,7 @@ export default function MapPage() {
                   <AreaChart
                     data={profile}
                     margin={{ top: 2, right: 4, bottom: 0, left: 0 }}
-                    onMouseMove={(state) => {
+                    onMouseMove={(state: any) => {
                       const pt = state?.activePayload?.[0]?.payload
                       if (pt) setChartHoverCoord([pt.lon, pt.lat])
                     }}
