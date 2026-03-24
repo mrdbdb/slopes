@@ -8,7 +8,7 @@ self.addEventListener('install', e => {
   e.waitUntil(
     Promise.all([
       caches.open(DATA).then(c => c.add('/data/index.json')),
-      caches.open(SHELL).then(c => c.addAll(['/icon-192.png', '/apple-touch-icon.png'])),
+      caches.open(SHELL).then(c => c.addAll(['/icon-192.png', '/icon-512.png', '/icon-512-maskable.png', '/apple-touch-icon.png'])),
     ])
   )
 })
@@ -24,7 +24,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url)
-  if (['/icon-192.png', '/apple-touch-icon.png'].includes(url.pathname)) {
+  if (['/icon-192.png', '/icon-512.png', '/icon-512-maskable.png', '/apple-touch-icon.png'].includes(url.pathname)) {
     e.respondWith(cacheFirst(SHELL, e.request))
   } else if (url.hostname === 'tile.opentopomap.org') {
     e.respondWith(tileFirst(e.request))
