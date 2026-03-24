@@ -33,11 +33,18 @@ RESORTS = [
         "dem_bbox": (-120.16, 39.23, -120.09, 39.30),
         "color": "forestgreen",
     },
+    {
+        "name": "Sugar Bowl",
+        "osm_bbox": "(39.28,-120.38,39.33,-120.32)",
+        "dem_bbox": (-120.38, 39.28, -120.32, 39.33),
+        "color": "darkorange",
+    },
 ]
 
 SAMPLE_SPACING_M = 10       # meters between sample points along each run
 SMOOTH_POINTS    = 3        # default; used for the static PNG only
 SMOOTH_LEVELS    = [1, 2, 3]  # exported for the web UI (1 = raw, 3 = SteepSeeker)
+GEO_SEGMENT_STEP = 3        # take every Nth 10m point → ~30m map segments
 DEM_RESOLUTION_M = 10       # requested DEM pixel size
 CACHE_DIR        = "cache"  # local cache for all downloaded data
 OVERPASS_URLS    = [
@@ -590,14 +597,28 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
         osm_runs = load_json_cache(resort["name"]) or []
         osm_id_by_resort[resort["name"]] = {r["name"]: r["id"] for r in osm_runs}
 
-    index = []
+    # Index always lists every configured resort so the UI knows what's available
+    index = [
+        {"name": r["name"], "slug": r["name"].lower().replace(" ", "_"),
+         "color": r["color"], "smooth_levels": SMOOTH_LEVELS}
+        for r in RESORTS
+    ]
+    with open(os.path.join(UI_DATA_DIR, "index.json"), "w") as f:
+        json.dump(index, f)
+
     for resort in RESORTS:
         name  = resort["name"]
         color = resort["color"]
         slug  = name.lower().replace(" ", "_")
-        osm_id_by_name = osm_id_by_resort[name]
+        osm_id_by_name = osm_id_by_resort.get(name, {})
+
+        # Skip resorts that weren't processed this run
+        if not any(name in results for results in all_results_by_smooth.values()):
+            continue
 
         for smooth_pts, all_results in all_results_by_smooth.items():
+            if name not in all_results:
+                continue
             rows = _sorted_with_separators(all_results[name])
             runs_out = []
 
@@ -630,19 +651,173 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
                 json.dump({"name": name, "color": color, "runs": runs_out}, f)
             print(f"  UI data → {out_path}  ({len([r for r in runs_out if r])} runs)")
 
-        index.append({"name": name, "slug": slug, "color": color,
-                      "smooth_levels": SMOOTH_LEVELS})
 
-    with open(os.path.join(UI_DATA_DIR, "index.json"), "w") as f:
-        json.dump(index, f)
+
+# ── Lift fetching & export ───────────────────────────────────────────────────
+
+def fetch_lifts(resort_name: str, bbox: str) -> list[dict]:
+    cache_name = f"{resort_name}_lifts"
+    cached = load_json_cache(cache_name)
+    if cached is not None:
+        print(f"  Using cached lift data ({len(cached)} lifts)")
+        return cached
+
+    query = f"""
+[out:json][timeout:60];
+(
+  way["aerialway"]{bbox};
+);
+out body;
+>;
+out skel qt;
+"""
+    last_err = None
+    for url in OVERPASS_URLS:
+        try:
+            print(f"    trying {url.split('/')[2]} …", end=" ", flush=True)
+            resp = requests.post(url, data={"data": query}, timeout=60)
+            resp.raise_for_status()
+            print("ok")
+            data = resp.json()
+            break
+        except Exception as e:
+            print(f"failed ({e})")
+            last_err = e
+            time.sleep(3)
+    else:
+        raise RuntimeError(f"All Overpass mirrors failed: {last_err}")
+
+    nodes = {e["id"]: (e["lat"], e["lon"])
+             for e in data["elements"] if e["type"] == "node"}
+
+    lifts = []
+    for e in data["elements"]:
+        if e["type"] != "way":
+            continue
+        tags  = e.get("tags", {})
+        name  = tags.get("name")
+        if not name:
+            continue
+        coords = [nodes[nid] for nid in e["nodes"] if nid in nodes]
+        if len(coords) >= 2:
+            lifts.append({
+                "name":   name,
+                "type":   tags.get("aerialway", "unknown"),
+                "coords": coords,
+            })
+
+    save_json_cache(cache_name, lifts)
+    return lifts
+
+
+def export_lifts_geo_json(resort: dict, lifts: list) -> None:
+    slug = resort["name"].lower().replace(" ", "_")
+    path = os.path.join(UI_DATA_DIR, f"{slug}_lifts.json")
+    features = []
+    for lift in lifts:
+        coords = [[round(lon, 6), round(lat, 6)] for lat, lon in lift["coords"]]
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {"name": lift["name"], "type": lift["type"]},
+        })
+    with open(path, "w") as f:
+        json.dump({"type": "FeatureCollection", "features": features}, f)
+    print(f"  Lifts GeoJSON → {path}  ({len(features)} lifts)")
+
+
+# ── Geo JSON export (for map view) ───────────────────────────────────────────
+
+def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s3: list) -> None:
+    """Write a slope-coloured GeoJSON file for the resort map view."""
+    slug = resort["name"].lower().replace(" ", "_")
+    path = os.path.join(UI_DATA_DIR, f"{slug}_geo.json")
+
+    steepest_by_name = {
+        run_name: steepest_30m(slope)
+        for run_name, _, slope in profiles_s3
+        if slope is not None
+    }
+    osm_id_by_name = {r["name"]: r["id"] for r in runs_meta}
+
+    step = GEO_SEGMENT_STEP
+    features = []
+
+    for run_name, pts_10m, elevs_10m in raw_samples:
+        indices = list(range(0, len(pts_10m), step))
+        if indices[-1] != len(pts_10m) - 1:
+            indices.append(len(pts_10m) - 1)
+
+        pts_s   = [pts_10m[i]   for i in indices]
+        elevs_s = [elevs_10m[i] for i in indices]
+
+        valid = [(p, e) for p, e in zip(pts_s, elevs_s) if e is not None]
+        if len(valid) < 3:
+            continue
+        pts_v, elevs_v = zip(*valid)
+        elevs_arr = np.array(elevs_v, dtype=float)
+
+        # Orient top-to-bottom
+        if elevs_arr[0] < elevs_arr[-1]:
+            pts_v     = pts_v[::-1]
+            elevs_arr = elevs_arr[::-1]
+
+        seg_slopes = []
+        for i in range(len(pts_v) - 1):
+            d = haversine(*pts_v[i], *pts_v[i + 1])
+            if d == 0:
+                seg_slopes.append(0.0)
+                continue
+            dh = float(elevs_arr[i] - elevs_arr[i + 1])   # positive = downhill
+            deg = math.degrees(math.atan2(abs(dh), d)) * (1 if dh >= 0 else -1)
+            seg_slopes.append(round(max(-5.0, min(55.0, deg)), 1))
+
+        coords = [[round(lon, 6), round(lat, 6)] for lat, lon in pts_v]
+
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {
+                "name":     run_name,
+                "steepest": round(steepest_by_name.get(run_name, 0.0), 1),
+                "osm_id":   osm_id_by_name.get(run_name),
+                "slopes":   seg_slopes,
+            },
+        })
+
+    geojson = {
+        "type":    "FeatureCollection",
+        "resort":  resort["name"],
+        "color":   resort["color"],
+        "features": features,
+    }
+    with open(path, "w") as f:
+        json.dump(geojson, f)
+    print(f"  Geo JSON → {path}  ({len(features)} runs)")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--resort", metavar="NAME",
+                        help="Process only this resort (default: all)")
+    args = parser.parse_args()
+
+    if args.resort:
+        resorts = [r for r in RESORTS
+                   if r["name"].lower() == args.resort.lower()]
+        if not resorts:
+            names = ", ".join(f'"{r["name"]}"' for r in RESORTS)
+            print(f"Resort not found. Available: {names}")
+            return
+    else:
+        resorts = RESORTS
+
     all_results_by_smooth: dict[int, dict] = {s: {} for s in SMOOTH_LEVELS}
 
-    for resort in RESORTS:
+    for resort in resorts:
         name = resort["name"]
         print(f"\n▶ {name}")
 
@@ -687,10 +862,37 @@ def main():
 
             all_results_by_smooth[s][name] = results
 
-    # 4. Export JSON for the web UI
+        # 4. Geo JSON for map view
+        geo_out = os.path.join(UI_DATA_DIR, f"{name.lower().replace(' ', '_')}_geo.json")
+        if not os.path.exists(geo_out):
+            if raw_samples is None:
+                print("  Sampling DEM for geo export …", flush=True)
+                raw_samples = []
+                for run in runs:
+                    pts   = interpolate_run(run["coords"], SAMPLE_SPACING_M)
+                    elevs = sample_dem(tif, pts)
+                    raw_samples.append((run["name"], pts, elevs))
+            export_geo_json(resort, runs, raw_samples,
+                            all_results_by_smooth[3].get(name, []))
+        else:
+            print(f"  Geo JSON cached: {geo_out}")
+
+        # 5. Lift data for map view
+        lifts_out = os.path.join(UI_DATA_DIR, f"{name.lower().replace(' ', '_')}_lifts.json")
+        if not os.path.exists(lifts_out):
+            print("  Fetching lift data from OSM …", flush=True)
+            lifts = fetch_lifts(name, resort["osm_bbox"])
+            print(f"  {len(lifts)} named lifts found")
+            export_lifts_geo_json(resort, lifts)
+        else:
+            print(f"  Lifts cached: {lifts_out}")
+
+    # 6. Export JSON for the web UI
     export_for_ui(all_results_by_smooth)
 
-    # 5. Plot (use default smooth level)
+    # 7. Plot (only when all resorts were processed)
+    if len(resorts) < len(RESORTS):
+        return
     fig = build_figure(all_results_by_smooth[SMOOTH_POINTS])
 
     out = "blue_runs_comparison.png"

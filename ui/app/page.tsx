@@ -1,8 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { ResortData, RunProfile, TIERS, tierFor } from "@/lib/types"
 import RunRow from "@/components/RunRow"
+
+interface ResortMeta { name: string; slug: string; color: string }
 
 function groupByTierAndDeg(data: ResortData): Record<string, Record<number, RunProfile[]>> {
   const groups: Record<string, Record<number, RunProfile[]>> = {}
@@ -17,8 +20,23 @@ function groupByTierAndDeg(data: ResortData): Record<string, Record<number, RunP
   return groups
 }
 
+function useResortData(slug: string, smoothing: number) {
+  const [data, setData] = useState<ResortData | null>(null)
+  useEffect(() => {
+    if (!slug) return
+    setData(null)
+    fetch(`/data/${slug}_s${smoothing}.json`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(console.error)
+  }, [slug, smoothing])
+  return data
+}
+
 export default function Home() {
-  const [resorts, setResorts]         = useState<ResortData[]>([])
+  const [allResorts, setAllResorts]   = useState<ResortMeta[]>([])
+  const [leftSlug, setLeftSlug]       = useState("palisades_tahoe")
+  const [rightSlug, setRightSlug]     = useState("northstar")
   const [hiddenTiers, setHiddenTiers] = useState<Set<string>>(new Set())
   const [maxLengthInput, setMaxLengthInput] = useState("")
   const [smoothing, setSmoothing]     = useState(3)
@@ -28,11 +46,14 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true)
+    fetch("/data/index.json").then(r => r.json()).then(setAllResorts).catch(console.error)
     try {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length)  setHiddenTiers(new Set(prefs.hiddenTiers))
       if (prefs.maxLengthInput)       setMaxLengthInput(prefs.maxLengthInput)
       if (prefs.smoothing)            setSmoothing(prefs.smoothing)
+      if (prefs.leftSlug)             setLeftSlug(prefs.leftSlug)
+      if (prefs.rightSlug)            setRightSlug(prefs.rightSlug)
     } catch {}
   }, [])
 
@@ -40,29 +61,28 @@ export default function Home() {
     if (!mounted) return
     try {
       localStorage.setItem("ski-prefs", JSON.stringify({
-        hiddenTiers:    Array.from(hiddenTiers),
+        hiddenTiers: Array.from(hiddenTiers),
         maxLengthInput,
         smoothing,
+        leftSlug,
+        rightSlug,
       }))
     } catch {}
-  }, [hiddenTiers, maxLengthInput, smoothing, mounted])
+  }, [hiddenTiers, maxLengthInput, smoothing, leftSlug, rightSlug, mounted])
 
-  useEffect(() => {
-    setResorts([])
-    Promise.all([
-      fetch(`/data/palisades_tahoe_s${smoothing}.json`).then(r => r.json()),
-      fetch(`/data/northstar_s${smoothing}.json`).then(r => r.json()),
-    ]).then(setResorts).catch(console.error)
-  }, [smoothing])
+  const leftData  = useResortData(leftSlug,  smoothing)
+  const rightData = useResortData(rightSlug, smoothing)
 
   const maxLengthKm = maxLengthInput ? parseFloat(maxLengthInput) : null
 
-  const maxDist = resorts.length
+  const maxDist = (leftData || rightData)
     ? Math.min(
         maxLengthKm ?? Infinity,
-        Math.max(...resorts.flatMap(r =>
-          r.runs.filter(Boolean).map(run => (run as RunProfile).length_km)
-        ))
+        Math.max(
+          ...[leftData, rightData].flatMap(d =>
+            d ? d.runs.filter(Boolean).map(r => (r as RunProfile).length_km) : [0]
+          )
+        )
       )
     : 1
 
@@ -90,25 +110,21 @@ export default function Home() {
     }
   }
 
-  if (!resorts.length) {
-    return (
-      <div className="flex items-center justify-center h-screen text-gray-400 text-sm">
-        Loading…
-      </div>
-    )
-  }
-
-  const [palisades, northstar] = resorts
-  const palByTier = groupByTierAndDeg(palisades)
-  const norByTier = groupByTierAndDeg(northstar)
-
   const tiersToShow = TIERS.filter(t => !hiddenTiers.has(t.label))
+
+  const columns = [
+    { slug: leftSlug,  setSlug: setLeftSlug,  data: leftData  },
+    { slug: rightSlug, setSlug: setRightSlug, data: rightData },
+  ]
+
+  const byTier = columns.map(c => c.data ? groupByTierAndDeg(c.data) : null)
 
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Top bar */}
       <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0">
         <h1 className="text-sm font-bold text-gray-800">Ski Run Comparison</h1>
+        <Link href="/map" className="text-xs text-gray-400 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5">Map →</Link>
 
         <div className="flex gap-1 items-center">
           <button
@@ -172,35 +188,46 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Column headers */}
+      {/* Column headers with resort dropdowns */}
       <div className="flex border-b border-gray-200 shrink-0">
-        {[palisades, northstar].map(resort => (
-          <div key={resort.name} className="flex-1 flex items-baseline gap-2 px-2 py-1.5">
-            <span className="text-sm font-bold text-gray-800">{resort.name}</span>
-            <span className="text-xs text-gray-400">
-              {resort.runs.filter(Boolean).length} runs
-            </span>
+        {columns.map(({ slug, setSlug, data }) => (
+          <div key={slug} className="flex-1 flex items-baseline gap-2 px-2 py-1.5">
+            <select
+              value={slug}
+              onChange={e => setSlug(e.target.value)}
+              className="text-sm font-bold text-gray-800 bg-transparent border-none outline-none cursor-pointer"
+            >
+              {allResorts.map(r => (
+                <option key={r.slug} value={r.slug}>{r.name}</option>
+              ))}
+            </select>
+            {data && (
+              <span className="text-xs text-gray-400">
+                {data.runs.filter(Boolean).length} runs
+              </span>
+            )}
           </div>
         ))}
       </div>
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto">
-        {tiersToShow.map(tier => {
-          const palDegMap = palByTier[tier.label] ?? {}
-          const norDegMap = norByTier[tier.label] ?? {}
-          const allDegs = Array.from(new Set([
-            ...Object.keys(palDegMap).map(Number),
-            ...Object.keys(norDegMap).map(Number),
-          ])).sort((a, b) => b - a)
+        {(!leftData || !rightData) && (
+          <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+            Loading…
+          </div>
+        )}
+        {leftData && rightData && tiersToShow.map(tier => {
+          const degMaps = byTier.map(bt => bt?.[tier.label] ?? {})
+          const allDegs = Array.from(new Set(
+            degMaps.flatMap(m => Object.keys(m).map(Number))
+          )).sort((a, b) => b - a)
           if (allDegs.length === 0) return null
 
-          const palTotal = Object.values(palDegMap).flat().length
-          const norTotal = Object.values(norDegMap).flat().length
+          const totals = degMaps.map(m => Object.values(m).flat().length)
 
           return (
             <div key={tier.label}>
-              {/* Tier header — spans both columns, always aligned */}
               <div
                 className="flex items-center gap-2 px-3 py-1 sticky top-0 z-10 border-y border-dashed text-xs font-semibold"
                 style={{
@@ -213,21 +240,17 @@ export default function Home() {
                 <span className="font-normal text-gray-400">
                   {tier.min > 0 ? `≥ ${tier.min}°` : `< ${TIERS[TIERS.length - 2].min}°`}
                   {" · "}
-                  {palTotal} Palisades · {norTotal} Northstar
+                  {columns.map((c, i) => `${totals[i]} ${allResorts.find(r => r.slug === c.slug)?.name ?? c.slug}`).join(" · ")}
                 </span>
               </div>
 
-              {/* Degree-aligned rows: same floor(steepest) renders side by side */}
-              {allDegs.map(deg => {
-                const palRuns = palDegMap[deg] ?? []
-                const norRuns = norDegMap[deg] ?? []
-                return (
-                  <div key={deg} className="flex divide-x divide-gray-100">
-                    {[
-                      { resort: palisades, runs: palRuns },
-                      { resort: northstar, runs: norRuns },
-                    ].map(({ resort, runs }) => (
-                      <div key={resort.name} className="flex-1 min-w-0">
+              {allDegs.map(deg => (
+                <div key={deg} className="flex divide-x divide-gray-100">
+                  {columns.map((col, i) => {
+                    const runs = degMaps[i][deg] ?? []
+                    const resort = col.data!
+                    return (
+                      <div key={col.slug} className="flex-1 min-w-0">
                         {runs.map(run => (
                           <RunRow
                             key={run.name}
@@ -240,14 +263,12 @@ export default function Home() {
                             mounted={mounted}
                           />
                         ))}
-                        {runs.length === 0 && (
-                          <div style={{ height: 41 }} />
-                        )}
+                        {runs.length === 0 && <div style={{ height: 41 }} />}
                       </div>
-                    ))}
-                  </div>
-                )
-              })}
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           )
         })}
