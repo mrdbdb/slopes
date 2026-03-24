@@ -107,6 +107,8 @@ export default function MapPage() {
   const [minDelta, setMinDelta]               = useState(0)
   const [mobilePanel, setMobilePanel] = useState<"list" | "filters" | "settings" | null>(null)
   const [bearing, setBearing]         = useState(180)
+  const [showLocation, setShowLocation] = useState(false)
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -178,6 +180,16 @@ export default function MapPage() {
     }).catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [slug])
+
+  useEffect(() => {
+    if (!showLocation || !navigator.geolocation) return
+    const id = navigator.geolocation.watchPosition(
+      pos => setUserLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      () => setShowLocation(false),
+      { enableHighAccuracy: true }
+    )
+    return () => navigator.geolocation.clearWatch(id)
+  }, [showLocation])
 
   function handleRunClick(name: string) {
     setPinnedRun(prev => prev === name ? null : name)
@@ -315,6 +327,19 @@ export default function MapPage() {
           </button>
         ))}
       </div>
+      <button
+        onClick={() => { setShowLocation(p => !p); if (showLocation) setUserLocation(null) }}
+        className={`p-1.5 rounded transition-colors ${showLocation ? "text-blue-500" : "text-gray-400 hover:text-gray-700"}`}
+        title="My location"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <circle cx="8" cy="8" r="3" />
+          <line x1="8" y1="1" x2="8" y2="4" />
+          <line x1="8" y1="12" x2="8" y2="15" />
+          <line x1="1" y1="8" x2="4" y2="8" />
+          <line x1="12" y1="8" x2="15" y2="8" />
+        </svg>
+      </button>
     </div>
   )
 
@@ -480,6 +505,7 @@ export default function MapPage() {
             useFace={useFace}
             chartHoverCoord={chartHoverCoord}
             bearing={bearing}
+            userLocation={userLocation}
           />
           {/* Slope profile chart overlay */}
           {effectivePin && mounted && (() => {

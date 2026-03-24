@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { MapContainer, TileLayer, Polyline, Polygon, Marker, CircleMarker, useMap, useMapEvents } from "react-leaflet"
+import { MapContainer, TileLayer, Polyline, Polygon, Marker, Circle, CircleMarker, useMap, useMapEvents } from "react-leaflet"
 import type { LatLngBoundsExpression } from "leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -47,6 +47,7 @@ interface Props {
   useFace?: boolean
   chartHoverCoord?: [number, number] | null  // [lon, lat]
   bearing?: number
+  userLocation?: { lat: number; lon: number; accuracy: number } | null
 }
 
 function slopeColor(deg: number): string {
@@ -225,7 +226,7 @@ function FitBounds({ runs }: { runs: RunGeo[] }) {
 
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, dimmedRuns, useFace = true, chartHoverCoord, bearing = 180 }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, dimmedRuns, useFace = true, chartHoverCoord, bearing = 180, userLocation }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -358,6 +359,26 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
           pathOptions={{ color: "#fff", weight: 2, fillColor: "#1e293b", fillOpacity: 1 }}
           interactive={false}
         />
+      )}
+
+      {/* User location */}
+      {userLocation && (
+        <>
+          {userLocation.accuracy < 500 && (
+            <Circle
+              center={[userLocation.lat, userLocation.lon]}
+              radius={userLocation.accuracy}
+              pathOptions={{ color: "#3b82f6", weight: 1, fillColor: "#3b82f6", fillOpacity: 0.1 }}
+              interactive={false}
+            />
+          )}
+          <CircleMarker
+            center={[userLocation.lat, userLocation.lon]}
+            radius={7}
+            pathOptions={{ color: "#fff", weight: 2.5, fillColor: "#3b82f6", fillOpacity: 1 }}
+            interactive={false}
+          />
+        </>
       )}
     </MapContainer>
   )
