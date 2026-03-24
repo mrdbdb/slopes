@@ -1,7 +1,46 @@
 "use client"
 
 import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer } from "recharts"
-import { RunProfile, tierFor, TIERS } from "@/lib/types"
+import { RunProfile, tierFor, effectiveSteepest, TIERS } from "@/lib/types"
+
+export function PisteBadge({ difficulty }: { difficulty: string }) {
+  switch (difficulty) {
+    case "novice":
+    case "easy":
+      return (
+        <svg width="10" height="10" viewBox="0 0 10 10" className="inline-block shrink-0">
+          <circle cx="5" cy="5" r="4.5" fill="#22c55e" />
+        </svg>
+      )
+    case "intermediate":
+      return (
+        <svg width="10" height="10" viewBox="0 0 10 10" className="inline-block shrink-0">
+          <rect x="0.5" y="0.5" width="9" height="9" fill="#3b82f6" />
+        </svg>
+      )
+    case "advanced":
+      return (
+        <svg width="10" height="10" viewBox="0 0 10 10" className="inline-block shrink-0">
+          <rect x="1" y="1" width="8" height="8" fill="#1f2937" transform="rotate(45 5 5)" />
+        </svg>
+      )
+    case "expert":
+      return (
+        <svg width="16" height="10" viewBox="0 0 16 10" className="inline-block shrink-0">
+          <rect x="1" y="1" width="8" height="8" fill="#1f2937" transform="rotate(45 5 5)" />
+          <rect x="7" y="1" width="8" height="8" fill="#1f2937" transform="rotate(45 11 5)" />
+        </svg>
+      )
+    case "freeride":
+      return (
+        <svg width="12" height="10" viewBox="0 0 12 10" className="inline-block shrink-0">
+          <ellipse cx="6" cy="5" rx="5.5" ry="4.5" fill="#f97316" />
+        </svg>
+      )
+    default:
+      return null
+  }
+}
 
 interface Props {
   run: RunProfile
@@ -14,7 +53,7 @@ interface Props {
 }
 
 export default function RunRow({ run, accentColor, highlighted, onHover, onClick, maxDist, mounted }: Props) {
-  const tier = tierFor(run.steepest)
+  const tier = tierFor(effectiveSteepest(run))
   const data = run.profile.map(([dist, slope]) => ({ dist, slope: Math.max(0, slope) }))
 
   return (
@@ -28,20 +67,23 @@ export default function RunRow({ run, accentColor, highlighted, onHover, onClick
     >
       {/* Run name + steepest */}
       <div className="w-44 shrink-0 text-right pr-2">
-        {run.osm_id ? (
-          <a
-            href={`https://www.openstreetmap.org/way/${run.osm_id}?layers=P`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            className="text-xs font-medium text-gray-700 leading-tight truncate block hover:text-blue-600 hover:underline"
-          >
-            {run.name}
-          </a>
-        ) : (
-          <div className="text-xs font-medium text-gray-700 leading-tight truncate">{run.name}</div>
-        )}
-        <div className="text-xs font-bold" style={{ color: tier.color }}>{run.steepest.toFixed(1)}°</div>
+        <div className="flex items-center justify-end gap-1">
+          {run.osm_difficulty && <PisteBadge difficulty={run.osm_difficulty} />}
+          {run.osm_id ? (
+            <a
+              href={`https://www.openstreetmap.org/way/${run.osm_id}?layers=P`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="text-xs font-medium text-gray-700 leading-tight truncate hover:text-blue-600 hover:underline"
+            >
+              {run.name}
+            </a>
+          ) : (
+            <span className="text-xs font-medium text-gray-700 leading-tight truncate">{run.name}</span>
+          )}
+        </div>
+        <div className="text-xs font-bold" style={{ color: tier.color }}>{effectiveSteepest(run).toFixed(1)}°</div>
       </div>
 
       {/* Slope profile chart */}

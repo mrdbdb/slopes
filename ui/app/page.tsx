@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { ResortData, RunProfile, TIERS, tierFor } from "@/lib/types"
+import { ResortData, RunProfile, TIERS, tierFor, effectiveSteepest } from "@/lib/types"
 import RunRow from "@/components/RunRow"
 
 interface ResortMeta { name: string; slug: string; color: string }
@@ -12,8 +12,8 @@ function groupByTierAndDeg(data: ResortData): Record<string, Record<number, RunP
   for (const t of TIERS) groups[t.label] = {}
   for (const run of data.runs) {
     if (run === null) continue
-    const tier = tierFor(run.steepest).label
-    const deg = Math.floor(run.steepest)
+    const tier = tierFor(effectiveSteepest(run)).label
+    const deg = Math.floor(effectiveSteepest(run))
     if (!groups[tier][deg]) groups[tier][deg] = []
     groups[tier][deg].push(run)
   }
@@ -39,7 +39,7 @@ export default function Home() {
   const [rightSlug, setRightSlug]     = useState("northstar")
   const [hiddenTiers, setHiddenTiers] = useState<Set<string>>(new Set())
   const [maxLengthInput, setMaxLengthInput] = useState("")
-  const [smoothing, setSmoothing]     = useState(3)
+  const [smoothing, setSmoothing]     = useState(30)
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const [clicked, setClicked]         = useState<string | null>(null)
   const [mounted, setMounted]         = useState(false)
@@ -51,7 +51,7 @@ export default function Home() {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length)  setHiddenTiers(new Set(prefs.hiddenTiers))
       if (prefs.maxLengthInput)       setMaxLengthInput(prefs.maxLengthInput)
-      if (prefs.smoothing)            setSmoothing(prefs.smoothing)
+      if ([2, 10, 30].includes(prefs.smoothing)) setSmoothing(prefs.smoothing)
       if (prefs.leftSlug)             setLeftSlug(prefs.leftSlug)
       if (prefs.rightSlug)            setRightSlug(prefs.rightSlug)
     } catch {}
@@ -162,9 +162,9 @@ export default function Home() {
             onChange={e => setSmoothing(Number(e.target.value))}
             className="px-1.5 py-0.5 border border-gray-200 rounded text-xs text-gray-700 focus:outline-none focus:border-gray-400"
           >
-            <option value={1}>1 — raw</option>
-            <option value={2}>2 — 20m</option>
-            <option value={3}>3 — 30m (SteepSeeker)</option>
+            <option value={2}>2m (raw)</option>
+            <option value={10}>10m</option>
+            <option value={30}>30m (SteepSeeker)</option>
           </select>
         </div>
 
@@ -253,7 +253,7 @@ export default function Home() {
                       <div key={col.slug} className="flex-1 min-w-0">
                         {runs.map(run => (
                           <RunRow
-                            key={run.name}
+                            key={`${run.osm_id ?? run.name}-${run.steepest}-${run.name}`}
                             run={truncateRun(run)}
                             accentColor={resort.color}
                             highlighted={activeHighlight === run.name}
