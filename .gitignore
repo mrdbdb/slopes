@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+cache/
+blue_runs_comparison.png
+image.png
+.claude/
+ui/node_modules/
+ui/.next/
