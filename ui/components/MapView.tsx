@@ -8,7 +8,7 @@ import "leaflet/dist/leaflet.css"
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore – no types for leaflet-rotate
 import "leaflet-rotate"
-import { TIERS, tierFor } from "@/lib/types"
+import { TIERS, tierFor, effectiveSteepest } from "@/lib/types"
 
 declare module "leaflet" {
   interface Map { setBearing(deg: number): this }
@@ -21,6 +21,7 @@ export interface RunGeo {
   face_steepest?: number
   is_traverse?: boolean
   osm_id?: number
+  osm_difficulty?: string
   slopes: number[]      // face steepness per segment
   line_slopes?: number[] // directional steepness per segment
   is_area?: boolean
@@ -45,6 +46,7 @@ interface Props {
   dimmedRuns?: Set<string>
   useFace?: boolean
   chartHoverCoord?: [number, number] | null  // [lon, lat]
+  bearing?: number
 }
 
 function slopeColor(deg: number): string {
@@ -163,7 +165,7 @@ function RunLabels({ runs, hovered, pinned, bearing, hiddenTiers }: { runs: RunG
       {runs.map(run => {
         if (run.is_area) return null
         if (run.name === hovered || run.name === pinned) return null
-        if (hiddenTiers?.has(tierFor(run.steepest).label)) return null
+        if (hiddenTiers?.has(tierFor(effectiveSteepest(run)).label)) return null
         const position = runMid(run.coordinates)
         const angle    = runAngleDeg(run.coordinates, bearing)
         return (
@@ -223,7 +225,7 @@ function FitBounds({ runs }: { runs: RunGeo[] }) {
 
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, dimmedRuns, useFace = true, chartHoverCoord }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, dimmedRuns, useFace = true, chartHoverCoord, bearing = 180 }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -232,8 +234,6 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       return map
     }, new Map<string, RunGeo>()).values()
   )
-
-  const bearing = 180
 
   return (
     <MapContainer
@@ -269,15 +269,15 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       <RunLabels runs={labelRuns} hovered={hovered} pinned={pinned} bearing={bearing} hiddenTiers={hiddenTiers} />
 
       {/* Area runs — rendered first so line runs appear on top */}
-      {runs.filter(r => r.is_area).map(run => {
+      {runs.filter(r => r.is_area).map((run, i) => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
-        const isDimmed  = hiddenTiers?.has(tierFor(run.steepest).label) ?? false
+        const isDimmed  = hiddenTiers?.has(tierFor(effectiveSteepest(run)).label) ?? false
         const color = isDimmed ? DIM_COLOR : slopeColor(run.steepest)
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
           <Polygon
-            key={run.name}
+            key={`area-${i}-${run.name}`}
             positions={positions}
             pathOptions={{
               color,
@@ -297,7 +297,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
 
       {/* Dimmed line runs — tier-hidden or delta-filtered, rendered before active */}
       {runs.filter(r => !r.is_area && (
-        (hiddenTiers?.has(tierFor(r.steepest).label) ?? false) || (dimmedRuns?.has(r.name) ?? false)
+        (hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false) || (dimmedRuns?.has(r.name) ?? false)
       )).map((run, di) => {
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
@@ -315,7 +315,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Active line runs — rendered after dimmed so they appear on top */}
-      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(r.steepest).label) ?? false) && !(dimmedRuns?.has(r.name) ?? false)).map(run => {
+      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false) && !(dimmedRuns?.has(r.name) ?? false)).map(run => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
         const slopes    = useFace ? run.slopes : (run.line_slopes ?? run.slopes)
@@ -339,7 +339,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
 
       {/* Run name label for hovered or pinned run (not dimmed) */}
       {labelRuns
-        .filter(r => (r.name === hovered || r.name === pinned) && !(hiddenTiers?.has(tierFor(r.steepest).label)))
+        .filter(r => (r.name === hovered || r.name === pinned) && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label)))
         .map(run => (
           <Marker
             key={`label-${run.name}`}

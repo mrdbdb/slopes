@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Compare intermediate (blue) ski runs: Palisades Tahoe vs Northstar California.
-Plots slope profile (degrees vs distance) for every blue run at each resort.
+SlopesDB pipeline — fetch, process, and export ski run slope data for all configured resorts.
+
+For each resort:
+  - Downloads run geometry from OpenStreetMap (Overpass API)
+  - Downloads a DEM (USGS 3DEP 2m for US resorts; Copernicus GLO-30 30m for Canadian resorts)
+  - Stitches same-name OSM ways with touching endpoints into single runs
+  - Computes slope profiles at multiple smoothing levels (2m / 10m / 30m)
+  - Computes face steepness (Horn gradient, direction-filtered) and line steepness
+  - Exports per-resort JSON for the web UI and a static summary chart
 
 Requirements:
     pip install requests numpy matplotlib rasterio
@@ -69,14 +76,23 @@ RESORTS = [
         "dem_resolution_m": 30,
         "spotlio_uuid": "1cfc07ddc36438c51a0d0a9c9a4c7fe92f6558c8b2094e35d8c4d1c250e6d2a1",
     },
+    {
+        "name": "Whistler Blackcomb",
+        "osm_bbox": "(50.04,-123.00,50.15,-122.85)",
+        "dem_bbox": (-123.00, 50.04, -122.85, 50.15),
+        "color": "teal",
+        "dem_source": "copernicus",
+        "dem_resolution_m": 30,
+    },
 ]
 
-SAMPLE_SPACING_M = 10       # meters between sample points along each run
-SMOOTH_POINTS    = 3        # default; used for the static PNG only
-SMOOTH_LEVELS    = [1, 2, 3]  # exported for the web UI (1 = raw, 3 = SteepSeeker)
-GEO_SEGMENT_STEP          = 3    # take every Nth 10m point → ~30m map segments
-TRAVERSE_DELTA_THRESHOLD  = 8.0  # flag as potential traverse if face_delta >= this (degrees)
-DEM_RESOLUTION_M = 10       # requested DEM pixel size
+SAMPLE_SPACING_M = 2        # meters between sample points along each run
+STEEPEST_WINDOW_M = 10     # rolling-mean window for steepest-pitch metric (metres)
+SMOOTH_POINTS    = 30       # default smooth level (m); used for the static PNG only
+SMOOTH_LEVELS    = [2, 10, 30]   # exported for the web UI (smoothing window in meters)
+GEO_SEGMENT_STEP          = 15   # take every Nth 2m point → ~30m map segments
+TRAVERSE_DELTA_THRESHOLD  = 5.0  # flag as potential traverse if face_delta >= this (degrees)
+FACE_DISPLAY_CAP          = 8.0  # geo display: face can exceed line by at most this (degrees)
 CACHE_DIR        = "cache"  # local cache for all downloaded data
 OVERPASS_URLS    = [
     "https://overpass-api.de/api/interpreter",
@@ -398,14 +414,15 @@ def compute_face_slope_raster(dem_path: str):
     return slope_arr, dz_dx.astype(np.float32), dz_dy.astype(np.float32), transform
 
 
-_COS_45 = math.cos(math.radians(45))
+FACE_DIRECTION_THRESHOLD_DEG = 25   # ignore face slopes where fall line > this° from travel
+_COS_FACE_THRESHOLD = math.cos(math.radians(FACE_DIRECTION_THRESHOLD_DEG))
 
 def sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr, transform,
                        coords: list[tuple]) -> list[float | None]:
     """Sample face-slope degrees (Horn gradient) at (lat, lon) pairs.
 
-    Points where the terrain fall line is >45° from the travel direction
-    return None — those slopes are beside the skier, not underfoot.
+    Points where the terrain fall line is >FACE_DIRECTION_THRESHOLD_DEG from the travel
+    direction return None — those slopes are beside the skier, not underfoot.
     Fall line in (east, north): (-dz_dx, dz_dy) per the Horn convention used here.
     """
     nrows, ncols = face_arr.shape
@@ -446,7 +463,7 @@ def sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr, transform,
             continue
 
         cos_theta = abs(fall_e * travel_e + fall_n * travel_n) / (fall_mag * travel_mag)
-        results.append(v if cos_theta >= _COS_45 else None)
+        results.append(v if cos_theta >= _COS_FACE_THRESHOLD else None)
     return results
 
 
@@ -706,7 +723,7 @@ def _point_in_polygon(lat, lon, ring):
     return inside
 
 
-def profile_area(coords, dem_path):
+def profile_area(coords, dem_path, spacing_m=SAMPLE_SPACING_M):
     """
     For an area run (polygon without the closing duplicate), sample a 10m grid
     inside the polygon and follow the steepest-descent path from the highest
@@ -724,8 +741,8 @@ def profile_area(coords, dem_path):
 
     m_per_lat = 111_000
     m_per_lon = 111_000 * math.cos(math.radians(lat_c))
-    dlat = SAMPLE_SPACING_M / m_per_lat
-    dlon = SAMPLE_SPACING_M / m_per_lon
+    dlat = spacing_m / m_per_lat
+    dlon = spacing_m / m_per_lon
 
     # Build index grid
     lat_steps, v = [], lat_min
@@ -847,6 +864,8 @@ def slope_profile(coords, elevs, smooth_pts: int):
         half   = smooth_pts // 2
         elev_c = np.convolve(elev_c, kernel, mode="valid")
         cum_c  = cum_c[half: half + len(elev_c)]
+        if len(cum_c) < 2:
+            return None, None
 
     # Per-segment slope
     horiz = np.diff(cum_c)
@@ -867,26 +886,33 @@ def slope_profile(coords, elevs, smooth_pts: int):
     return seg_mid, slope_deg
 
 
-def steepest_30m(slope_deg: np.ndarray) -> float:
-    """Max of a 3-point (30 m) rolling mean on downhill segments.
-    Matches SteepSeeker's 'steepest 30 m' methodology."""
+def steepest_30m(slope_deg: np.ndarray, spacing_m: int = SAMPLE_SPACING_M) -> float:
+    """Max rolling-mean slope over STEEPEST_WINDOW_M on downhill segments."""
+    w = max(2, STEEPEST_WINDOW_M // spacing_m)
     down = slope_deg[slope_deg > 0]
-    if len(down) < 3:
+    if len(down) < w:
         return float(np.max(down)) if len(down) > 0 else 0.0
-    rolling = np.convolve(down, np.ones(3) / 3.0, mode="valid")
+    rolling = np.convolve(down, np.ones(w) / w, mode="valid")
     return float(np.max(rolling))
 
 
-def face_steepest_30m(face_slopes: list) -> float:
-    """Max 3-point rolling mean of per-point face slopes (Horn gradient magnitude).
-    Same 30 m window as steepest_30m but uses terrain steepness, not run direction."""
-    valid = np.array([s for s in face_slopes if s is not None and s > 0], dtype=float)
-    if len(valid) < 3:
-        return float(np.max(valid)) if len(valid) > 0 else 0.0
-    return float(np.max(np.convolve(valid, np.ones(3) / 3.0, mode="valid")))
+FACE_SMOOTH_WINDOW_M = 10   # rolling-mean window for face steepest (metres)
+
+def face_steepest_30m(face_slopes: list, spacing_m: int = SAMPLE_SPACING_M) -> float:
+    """Max direction-filtered face slope (Horn gradient magnitude) along the run.
+    Uses a rolling mean over FACE_SMOOTH_WINDOW_M to require that steep terrain
+    persists across several consecutive samples rather than a single noisy pixel."""
+    valid = np.array([s if s is not None else 0.0 for s in face_slopes], dtype=float)
+    valid = np.clip(valid, 0.0, 55.0)
+    w = max(2, FACE_SMOOTH_WINDOW_M // spacing_m)
+    down = valid[valid > 0]
+    if len(down) < w:
+        return float(np.max(down)) if len(down) > 0 else 0.0
+    rolling = np.convolve(down, np.ones(w) / w, mode="valid")
+    return float(np.max(rolling))
 
 
-def get_steepest(slope_deg: np.ndarray | None, override: float | None) -> float:
+def get_steepest(slope_deg: np.ndarray | None, override: float | None, spacing_m: int = SAMPLE_SPACING_M) -> float:
     """Return the steepest-30m value, preferring an explicit override (used for
     area runs where the DP-computed value is more accurate than the single
     greedy-path profile)."""
@@ -894,7 +920,7 @@ def get_steepest(slope_deg: np.ndarray | None, override: float | None) -> float:
         return override
     if slope_deg is None:
         return 0.0
-    return steepest_30m(slope_deg)
+    return steepest_30m(slope_deg, spacing_m)
 
 
 def _dp_steepest_30m_area(elev_grid: dict, grid: dict) -> float:
@@ -1123,11 +1149,13 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
     """Write per-resort, per-smooth-level JSON files for the Next.js UI."""
     os.makedirs(UI_DATA_DIR, exist_ok=True)
 
-    # Build OSM id maps once
-    osm_id_by_resort = {}
+    # Build OSM id and difficulty maps once
+    osm_id_by_resort         = {}
+    osm_difficulty_by_resort = {}
     for resort in RESORTS:
         osm_runs = load_json_cache(resort["name"]) or []
-        osm_id_by_resort[resort["name"]] = {r["name"]: r["id"] for r in osm_runs}
+        osm_id_by_resort[resort["name"]]         = {r["name"]: r["id"] for r in osm_runs}
+        osm_difficulty_by_resort[resort["name"]] = {r["name"]: r.get("osm_difficulty") for r in osm_runs}
 
     # Index always lists every configured resort so the UI knows what's available
     index = [
@@ -1142,7 +1170,8 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
         name  = resort["name"]
         color = resort["color"]
         slug  = name.lower().replace(" ", "_")
-        osm_id_by_name = osm_id_by_resort.get(name, {})
+        osm_id_by_name         = osm_id_by_resort.get(name, {})
+        osm_difficulty_by_name = osm_difficulty_by_resort.get(name, {})
 
         # Skip resorts that weren't processed this run
         if not any(name in results for results in all_results_by_smooth.values()):
@@ -1181,6 +1210,9 @@ def export_for_ui(all_results_by_smooth: dict, max_points: int = 150) -> None:
                 osm_id = osm_id_by_name.get(run_name)
                 if osm_id is not None:
                     run_entry["osm_id"] = osm_id
+                osm_diff = osm_difficulty_by_name.get(run_name)
+                if osm_diff:
+                    run_entry["osm_difficulty"] = osm_diff
                 runs_out.append(run_entry)
 
             out_path = os.path.join(UI_DATA_DIR, f"{slug}_s{smooth_pts}.json")
@@ -1292,7 +1324,7 @@ def export_lifts_geo_json(resort: dict, lifts: list) -> None:
 
 # ── Geo JSON export (for map view) ───────────────────────────────────────────
 
-def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s3: list) -> None:
+def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s3: list, spacing_m: int = SAMPLE_SPACING_M) -> None:
     """Write a slope-coloured GeoJSON file for the resort map view.
 
     Slope coloring uses the same smooth=3 methodology as the profile data
@@ -1313,10 +1345,12 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s
         )
         face_steep_queue[run_name].append(face_steep)
 
-    osm_id_queue      = _dd(list)
-    orig_coords_queue = _dd(list)
+    osm_id_queue         = _dd(list)
+    osm_difficulty_queue = _dd(list)
+    orig_coords_queue    = _dd(list)
     for r in runs_meta:
         osm_id_queue[r["name"]].append(r["id"])
+        osm_difficulty_queue[r["name"]].append(r.get("osm_difficulty"))
         orig_coords_queue[r["name"]].append(r["coords"])
 
     def _pop_steepest(name):
@@ -1331,6 +1365,10 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s
         q = osm_id_queue.get(name, [])
         return q.pop(0) if q else None
 
+    def _pop_osm_difficulty(name):
+        q = osm_difficulty_queue.get(name, [])
+        return q.pop(0) if q else None
+
     def _pop_coords(name):
         q = orig_coords_queue.get(name, [])
         return q.pop(0) if q else []
@@ -1338,12 +1376,13 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s
     features = []
 
     for run_name, pts_10m, elevs_10m, _dp, face_slp in raw_samples:
-        steepest    = _pop_steepest(run_name)
+        steepest       = _pop_steepest(run_name)
         _pop_face_steep(run_name)   # consume queue entry; recompute from direction-filtered slp
-        osm_id      = _pop_osm_id(run_name)
-        coords_orig = _pop_coords(run_name)
+        osm_id         = _pop_osm_id(run_name)
+        osm_difficulty = _pop_osm_difficulty(run_name)
+        coords_orig    = _pop_coords(run_name)
 
-        face_steep  = face_steepest_30m(face_slp) if face_slp is not None else None
+        face_steep  = face_steepest_30m(face_slp, spacing_m) if face_slp is not None else None
         face_delta  = (face_steep - steepest) if face_steep is not None else None
         is_traverse = face_delta is not None and face_delta >= TRAVERSE_DELTA_THRESHOLD
 
@@ -1351,11 +1390,12 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s
         if len(coords_orig) > 2 and coords_orig[0] == coords_orig[-1]:
             ring = [[round(lon, 6), round(lat, 6)] for lat, lon in coords_orig]
             props = {
-                "name":     run_name,
-                "steepest": round(steepest, 1),
-                "osm_id":   osm_id,
-                "is_area":  True,
-                "slopes":   [],
+                "name":           run_name,
+                "steepest":       round(steepest, 1),
+                "osm_id":         osm_id,
+                "osm_difficulty": osm_difficulty,
+                "is_area":        True,
+                "slopes":         [],
             }
             if face_steep is not None:
                 props["face_steepest"] = round(face_steep, 1)
@@ -1383,38 +1423,49 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s
             elevs_arr = elevs_arr[::-1]
             face_v    = face_v[::-1]
 
-        # Smooth elevation with 3-point window (matches smooth=3 / SteepSeeker)
-        kernel = np.ones(3) / 3.0
-        half   = 1
-        elev_s = np.convolve(elevs_arr, kernel, mode="valid")   # len - 2
+        # Smooth elevation with 30m window (matches SteepSeeker methodology)
+        geo_w  = max(3, 30 // spacing_m)
+        kernel = np.ones(geo_w) / geo_w
+        half   = geo_w // 2
+        elev_s = np.convolve(elevs_arr, kernel, mode="valid")   # len - (geo_w-1)
         pts_s  = pts_v[half: half + len(elev_s)]                # aligned slice
+        if len(pts_s) < 2:
+            continue
 
-        # Compute 10m directional slopes from smoothed elevation
-        slopes_10m = []
+        # Compute directional slopes from smoothed elevation
+        slopes_seg = []
         for i in range(len(pts_s) - 1):
             d  = haversine(*pts_s[i], *pts_s[i + 1])
             if d == 0:
-                slopes_10m.append(0.0)
+                slopes_seg.append(0.0)
                 continue
             dh = float(elev_s[i] - elev_s[i + 1])
             deg = math.degrees(math.atan2(abs(dh), d)) * (1 if dh >= 0 else -1)
-            slopes_10m.append(max(-5.0, min(55.0, deg)))
+            slopes_seg.append(max(-5.0, min(55.0, deg)))
 
-        slopes_arr    = np.array(slopes_10m)
+        slopes_arr    = np.array(slopes_seg)
         slopes_smooth = (np.convolve(slopes_arr, kernel, mode="same")
-                         if len(slopes_arr) >= 3 else slopes_arr)
+                         if len(slopes_arr) >= geo_w else slopes_arr)
 
-        # Face slopes: per-point Horn gradient, smoothed and aligned to slopes_smooth
-        face_arr_v = np.array([f if f is not None else np.nan for f in face_v], dtype=float)
-        if len(face_arr_v) >= 3:
-            face_smooth = np.convolve(face_arr_v, kernel, mode="same")
-        else:
-            face_smooth = face_arr_v
-        face_smooth = np.clip(np.nan_to_num(face_smooth, nan=0.0), 0.0, 55.0)
-        face_trim   = face_smooth[half: half + len(slopes_smooth)]  # align lengths
+        # Face slopes: smooth over FACE_SMOOTH_WINDOW_M (10m) to eliminate
+        # single-pixel DEM noise, then cap how much face can exceed line slope.
+        # The cap (= FACE_DISPLAY_CAP) handles traverse artifacts where
+        # face >> line without over-smoothing real steep sections where face ≈ line.
+        face_raw  = np.array([f if f is not None else 0.0 for f in face_v], dtype=float)
+        face_raw  = np.clip(face_raw, 0.0, 55.0)
+        face_w    = max(2, FACE_SMOOTH_WINDOW_M // spacing_m)
+        face_kern = np.ones(face_w) / face_w
+        face_raw  = (np.convolve(face_raw, face_kern, mode="same")
+                     if len(face_raw) >= face_w else face_raw)
+        face_trim = face_raw[half: half + len(slopes_smooth)]  # align lengths
 
-        # Face slopes floored by line slopes: filtered-out face samples (zeroed by direction
-        # filter) fall back to the directional value rather than pulling the segment down.
+        # Cap: face can exceed line by at most FACE_DISPLAY_CAP degrees.
+        # On a true steep descent face ≈ line so the cap is inactive; on a
+        # traverse the cap prevents off-trail terrain from coloring segments wrong.
+        face_trim = np.minimum(face_trim, slopes_smooth + FACE_DISPLAY_CAP)
+
+        # Face slopes floored by line slopes: direction-filtered zeros fall back
+        # to the directional value rather than pulling the segment down.
         use_face = face_slp is not None and len(face_trim) == len(slopes_smooth)
         display_slopes = np.maximum(face_trim, slopes_smooth) if use_face else slopes_smooth
 
@@ -1433,11 +1484,12 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list, profiles_s
         coords    = [[round(lon, 6), round(lat, 6)] for lat, lon in coord_pts]
 
         props = {
-            "name":        run_name,
-            "steepest":    round(steepest, 1),
-            "osm_id":      osm_id,
-            "slopes":      seg_slopes,       # face steepness per segment (line if no face data)
-            "line_slopes": seg_line_slopes,  # directional steepness per segment
+            "name":           run_name,
+            "steepest":       round(steepest, 1),
+            "osm_id":         osm_id,
+            "osm_difficulty": osm_difficulty,
+            "slopes":         seg_slopes,       # face steepness per segment (line if no face data)
+            "line_slopes":    seg_line_slopes,  # directional steepness per segment
         }
         if face_steep is not None:
             props["face_steepest"] = round(face_steep, 1)
@@ -1482,11 +1534,12 @@ def main():
     all_results_by_smooth: dict[int, dict] = {s: {} for s in SMOOTH_LEVELS}
 
     for resort in resorts:
-        name = resort["name"]
+        name      = resort["name"]
+        spacing_m = resort["dem_resolution_m"]
         print(f"\n▶ {name}")
 
         # 1. DEM (download once, cache locally)
-        res_m = resort["dem_resolution_m"]
+        res_m = spacing_m
         tif = dem_path_for(name, res_m)
         if not os.path.exists(tif):
             if resort.get("dem_source") == "copernicus":
@@ -1525,13 +1578,13 @@ def main():
                         c = run["coords"]
                         is_area = len(c) > 2 and c[0] == c[-1]
                         if is_area:
-                            pts, elevs, dp_steepest = profile_area(c[:-1], tif)
+                            pts, elevs, dp_steepest = profile_area(c[:-1], tif, spacing_m)
                             if pts is None:          # fallback to perimeter
-                                pts         = interpolate_run(c, SAMPLE_SPACING_M)
+                                pts         = interpolate_run(c, spacing_m)
                                 elevs       = sample_dem(tif, pts)
                                 dp_steepest = None
                         else:
-                            pts         = interpolate_run(c, SAMPLE_SPACING_M)
+                            pts         = interpolate_run(c, spacing_m)
                             elevs       = sample_dem(tif, pts)
                             dp_steepest = None
                         face_slp = (sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr,
@@ -1540,13 +1593,13 @@ def main():
                         raw_samples.append((run["name"], pts, elevs, dp_steepest, face_slp))
 
                     face_steep_by_run = {
-                        run_name: face_steepest_30m(face_slp) if face_slp is not None else None
+                        run_name: face_steepest_30m(face_slp, spacing_m) if face_slp is not None else None
                         for run_name, _, _, _, face_slp in raw_samples
                     }
 
                 results = []
                 for run_name, pts, elevs, dp_steepest, _face_slp in raw_samples:
-                    dist, slope = slope_profile(pts, elevs, s)
+                    dist, slope = slope_profile(pts, elevs, max(1, s // spacing_m))
                     results.append((run_name, dist, slope, dp_steepest,
                                     face_steep_by_run.get(run_name)))
                     status = "ok" if dist is not None else "skip"
@@ -1566,19 +1619,19 @@ def main():
                     c = run["coords"]
                     is_area = len(c) > 2 and c[0] == c[-1]
                     if is_area:
-                        pts, elevs, dp_steepest = profile_area(c[:-1], tif)
+                        pts, elevs, dp_steepest = profile_area(c[:-1], tif, spacing_m)
                         if pts is None:
-                            pts         = interpolate_run(c, SAMPLE_SPACING_M)
+                            pts         = interpolate_run(c, spacing_m)
                             elevs       = sample_dem(tif, pts)
                     else:
-                        pts   = interpolate_run(run["coords"], SAMPLE_SPACING_M)
+                        pts   = interpolate_run(run["coords"], spacing_m)
                         elevs = sample_dem(tif, pts)
                     face_slp = (sample_face_slopes(face_arr, dz_dx_arr, dz_dy_arr,
                                                    face_transform, pts)
                                 if pts is not None else None)
                     raw_samples.append((run["name"], pts, elevs, None, face_slp))
             export_geo_json(resort, runs, raw_samples,
-                            all_results_by_smooth[3].get(name, []))
+                            all_results_by_smooth[30].get(name, []), spacing_m)
         else:
             print(f"  Geo JSON cached: {geo_out}")
 

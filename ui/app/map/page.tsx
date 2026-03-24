@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react"
 import dynamic from "next/dynamic"
-import Link from "next/link"
-import { TIERS, tierFor } from "@/lib/types"
+import { TIERS, tierFor, effectiveSteepest } from "@/lib/types"
 import type { RunGeo, LiftGeo } from "@/components/MapView"
+import { PisteBadge } from "@/components/RunRow"
 import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts"
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false })
@@ -18,7 +18,7 @@ interface GeoJSON {
     geometry: { type: string; coordinates: [number, number][] | [[number, number][]] }
     properties: {
       name: string; steepest: number; face_steepest?: number; is_traverse?: boolean
-      osm_id?: number; slopes: number[]; line_slopes?: number[]; is_area?: boolean
+      osm_id?: number; osm_difficulty?: string; slopes: number[]; line_slopes?: number[]; is_area?: boolean
     }
   }[]
 }
@@ -39,7 +39,6 @@ function runCentroid(run: RunGeo): [number, number] {
   ]
 }
 
-// Rename same-named runs that are geographically far apart with a (1), (2) index.
 function disambiguateRuns(runs: RunGeo[], thresholdKm = 1): RunGeo[] {
   const byName = new Map<string, number[]>()
   runs.forEach((r, i) => {
@@ -53,7 +52,6 @@ function disambiguateRuns(runs: RunGeo[], thresholdKm = 1): RunGeo[] {
     if (indices.length <= 1) continue
     const centroids = indices.map(i => runCentroid(runs[i]))
 
-    // Greedy clustering: assign each run to the first cluster within threshold
     const clusterOf: number[] = new Array(indices.length).fill(-1)
     let numClusters = 0
     for (let i = 0; i < indices.length; i++) {
@@ -106,6 +104,8 @@ export default function MapPage() {
   const [chartHoverCoord, setChartHoverCoord] = useState<[number, number] | null>(null)
   const [useFace, setUseFace]                 = useState(true)
   const [minDelta, setMinDelta]               = useState(0)
+  const [mobilePanel, setMobilePanel] = useState<"list" | "filters" | "settings" | null>(null)
+  const [bearing, setBearing]         = useState(180)
 
   useEffect(() => {
     setMounted(true)
@@ -143,6 +143,7 @@ export default function MapPage() {
   }
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     setRuns([])
     setLifts([])
@@ -150,20 +151,22 @@ export default function MapPage() {
       fetch(`/data/${slug}_geo.json`).then(r => r.json()),
       fetch(`/data/${slug}_lifts.json`).then(r => r.json()).catch(() => ({ features: [] })),
     ]).then(([geo, liftsJson]) => {
+      if (cancelled) return
       const parsed: RunGeo[] = (geo as GeoJSON).features.map(f => ({
         name:          f.properties.name,
         steepest:      f.properties.steepest,
         face_steepest: f.properties.face_steepest,
         is_traverse:   f.properties.is_traverse,
-        osm_id:        f.properties.osm_id,
-        slopes:        f.properties.slopes,
+        osm_id:         f.properties.osm_id,
+        osm_difficulty: f.properties.osm_difficulty,
+        slopes:         f.properties.slopes,
         line_slopes:   f.properties.line_slopes,
         is_area:       f.properties.is_area ?? false,
         coordinates:   (f.geometry.type === "Polygon"
           ? (f.geometry.coordinates as unknown as [number,number][][])[0]
           : f.geometry.coordinates) as [number, number][],
       }))
-      parsed.sort((a, b) => b.steepest - a.steepest)
+      parsed.sort((a, b) => effectiveSteepest(b) - effectiveSteepest(a))
       setRuns(disambiguateRuns(parsed))
       setLifts(liftsJson.features.map((f: { geometry: { coordinates: [number,number][] }, properties: { name: string, type: string } }) => ({
         name:        f.properties.name,
@@ -171,165 +174,274 @@ export default function MapPage() {
         coordinates: f.geometry.coordinates,
       })))
       setLoading(false)
-    }).catch(() => setLoading(false))
+    }).catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [slug])
 
   function handleRunClick(name: string) {
     setPinnedRun(prev => prev === name ? null : name)
+    setMobilePanel(null)
   }
 
-  // Suppress pin if its tier is currently hidden
   const pinnedRunData  = pinnedRun ? runs.find(r => r.name === pinnedRun) : undefined
-  const effectivePin   = pinnedRunData && hiddenTiers.has(tierFor(pinnedRunData.steepest).label) ? null : pinnedRun
+  const effectivePin   = pinnedRunData && hiddenTiers.has(tierFor(effectiveSteepest(pinnedRunData)).label) ? null : pinnedRun
 
-  // Runs dimmed by delta filter: have face data but delta < threshold
   const dimmedByDelta = new Set(
     minDelta > 0
       ? runs
-          .filter(r => r.face_steepest != null && (r.face_steepest - r.steepest) < minDelta)
+          .filter(r => r.face_steepest != null && (r.face_steepest - effectiveSteepest(r)) < minDelta)
           .map(r => r.name)
       : []
   )
 
-  // Deduplicate by name for the sidebar (multiple OSM segments can share a name)
   const uniqueRuns = Array.from(
     runs.reduce((map, r) => {
       const existing = map.get(r.name)
-      if (!existing || r.steepest > existing.steepest) map.set(r.name, r)
+      if (!existing || effectiveSteepest(r) > effectiveSteepest(existing)) map.set(r.name, r)
       return map
     }, new Map<string, RunGeo>()).values()
   )
 
-  // Group runs by tier for the sidebar (only visible tiers, respecting delta filter)
   const grouped = TIERS.map(tier => ({
     tier,
     runs: uniqueRuns.filter(r =>
-      tierFor(r.steepest).label === tier.label &&
+      tierFor(effectiveSteepest(r)).label === tier.label &&
       !hiddenTiers.has(tier.label) &&
       !dimmedByDelta.has(r.name)
     ),
   })).filter(g => g.runs.length > 0)
 
+  const runListContent = (
+    <>
+      {loading && (
+        <div className="flex items-center justify-center h-20 text-gray-400">Loading…</div>
+      )}
+      {grouped.map(({ tier, runs: tierRuns }) => (
+        <div key={tier.label}>
+          <div
+            className="sticky top-0 z-10 px-3 py-1 font-semibold text-xs border-b"
+            style={{ background: tier.color, color: "white", borderColor: tier.color }}
+          >
+            {tier.label} {tier.min > 0 ? `≥ ${tier.min}°` : ""}
+          </div>
+          {tierRuns.map((run, i) => {
+            const isPinned  = effectivePin === run.name
+            const isHovered = hovered   === run.name
+            return (
+              <div
+                key={`${run.name}-${i}`}
+                data-run={run.name}
+                className={`flex items-center gap-2 px-3 cursor-pointer transition-all ${
+                  isPinned ? "py-2.5" : "py-1.5"
+                }`}
+                style={{
+                  background: isPinned ? "#fef9c3" : isHovered ? "#f3f4f6" : undefined,
+                }}
+                onMouseEnter={() => setHovered(run.name)}
+                onMouseLeave={() => setHovered(null)}
+                onClick={() => handleRunClick(run.name)}
+              >
+                <span className={`flex-1 truncate text-gray-700 transition-all flex items-center gap-1 ${isPinned ? "font-bold text-sm" : ""}`}>
+                  {run.osm_difficulty && <PisteBadge difficulty={run.osm_difficulty} />}
+                  {run.name}
+                </span>
+                {run.is_traverse && (
+                  <span className="text-amber-400 text-xs shrink-0" title={`face ${run.face_steepest?.toFixed(1)}°`}>▲</span>
+                )}
+                <span className={`shrink-0 font-medium tabular-nums transition-all ${isPinned ? "text-sm" : ""}`} style={{ color: tier.color }}>
+                  {effectiveSteepest(run).toFixed(1)}°
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </>
+  )
+
+  const tierFilterContent = (
+    <div className="flex gap-1 items-center flex-wrap">
+      <button
+        onClick={() => setHiddenTiers(new Set())}
+        className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${
+          hiddenTiers.size === 0
+            ? "bg-gray-800 text-white border-gray-800"
+            : "text-gray-500 border-gray-200 hover:border-gray-400"
+        }`}
+      >
+        All
+      </button>
+      {TIERS.map(t => {
+        const visible = !hiddenTiers.has(t.label)
+        return (
+          <button
+            key={t.label}
+            onClick={() => toggleTier(t.label)}
+            className="px-2 py-0.5 rounded text-xs font-medium border transition-colors"
+            style={visible
+              ? { background: t.color, color: "#fff", borderColor: t.color }
+              : { color: "#aaa", borderColor: "#ddd" }}
+          >
+            {t.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  const settingsContent = (
+    <div className="flex items-center gap-2">
+      <span className="text-gray-400 text-xs">Δ≥</span>
+      <input
+        type="range" min={0} max={20} step={1} value={minDelta}
+        onChange={e => setMinDelta(Number(e.target.value))}
+        className="w-20 accent-gray-700"
+      />
+      <span className="tabular-nums text-xs text-gray-600 w-5">{minDelta}°</span>
+      <div className="flex gap-0.5 ml-1">
+        {(["Face", "Line"] as const).map(mode => (
+          <button
+            key={mode}
+            onClick={() => setUseFace(mode === "Face")}
+            className="px-2 py-0.5 rounded text-xs font-medium border transition-colors"
+            style={
+              (mode === "Face") === useFace
+                ? { background: "#1f2937", color: "#fff", borderColor: "#1f2937" }
+                : { color: "#aaa", borderColor: "#ddd" }
+            }
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0 text-sm">
-        <Link href="/" className="text-gray-400 hover:text-gray-700 text-xs">← Charts</Link>
-        <span className="font-bold text-gray-800">Run Map</span>
+        <span className="font-bold text-gray-800">SlopesDB</span>
 
         <select
           value={slug}
           onChange={e => setSlug(e.target.value)}
-          className="px-2 py-0.5 border border-gray-200 rounded text-xs text-gray-700 focus:outline-none focus:border-gray-400"
+          className="px-2 py-0.5 border border-gray-200 rounded text-sm font-bold text-gray-800 focus:outline-none focus:border-gray-400"
         >
           {resorts.map(r => (
             <option key={r.slug} value={r.slug}>{r.name}</option>
           ))}
         </select>
 
-        {!loading && <span className="text-xs text-gray-400">{runs.length} runs</span>}
+        {!loading && <span className="hidden md:inline text-xs text-gray-400">{runs.length} runs</span>}
 
-        <div className="flex gap-1 items-center">
-          <button
-            onClick={() => setHiddenTiers(new Set())}
-            className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${
-              hiddenTiers.size === 0
-                ? "bg-gray-800 text-white border-gray-800"
-                : "text-gray-500 border-gray-200 hover:border-gray-400"
-            }`}
-          >
-            All
-          </button>
-          {TIERS.map(t => {
-            const visible = !hiddenTiers.has(t.label)
-            return (
-              <button
-                key={t.label}
-                onClick={() => toggleTier(t.label)}
-                className="px-2 py-0.5 rounded text-xs font-medium border transition-colors"
-                style={visible
-                  ? { background: t.color, color: "#fff", borderColor: t.color }
-                  : { color: "#aaa", borderColor: "#ddd" }}
-              >
-                {t.label}
-              </button>
-            )
-          })}
+        {/* Desktop: tier filters */}
+        <div className="hidden md:flex gap-1 items-center">
+          {tierFilterContent}
         </div>
 
-        <div className="ml-auto flex items-center gap-2 border-l border-gray-200 pl-3">
-          <span className="text-gray-400 text-xs">Δ≥</span>
-          <input
-            type="range" min={0} max={20} step={1} value={minDelta}
-            onChange={e => setMinDelta(Number(e.target.value))}
-            className="w-20 accent-gray-700"
-          />
-          <span className="tabular-nums text-xs text-gray-600 w-5">{minDelta}°</span>
-          <div className="flex gap-0.5 ml-1">
-            {(["Face", "Line"] as const).map(mode => (
-              <button
-                key={mode}
-                onClick={() => setUseFace(mode === "Face")}
-                className="px-2 py-0.5 rounded text-xs font-medium border transition-colors"
-                style={
-                  (mode === "Face") === useFace
-                    ? { background: "#1f2937", color: "#fff", borderColor: "#1f2937" }
-                    : { color: "#aaa", borderColor: "#ddd" }
-                }
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
+        {/* Desktop: settings */}
+        <div className="hidden md:flex ml-auto items-center gap-2 border-l border-gray-200 pl-3">
+          {settingsContent}
+        </div>
+
+        {/* Mobile: icon buttons */}
+        <div className="flex md:hidden ml-auto items-center gap-1">
+          <button
+            onClick={() => setMobilePanel(p => p === "list" ? null : "list")}
+            className={`p-1.5 rounded border transition-colors ${mobilePanel === "list" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200"}`}
+            title="Run list"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="2" y1="4" x2="14" y2="4" />
+              <line x1="2" y1="8" x2="14" y2="8" />
+              <line x1="2" y1="12" x2="14" y2="12" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setMobilePanel(p => p === "filters" ? null : "filters")}
+            className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded border transition-colors ${mobilePanel === "filters" ? "border-gray-400 bg-gray-50" : "border-gray-200"}`}
+            title="Difficulty filters"
+          >
+            {TIERS.map(t => {
+              const visible = !hiddenTiers.has(t.label)
+              const fill = visible ? t.color : "none"
+              const stroke = visible ? t.color : "#bbb"
+              const sw = visible ? 0 : 1
+              if (t.label === "Expert") return (
+                <svg key={t.label} width="15" height="8" viewBox="0 0 15 8">
+                  <polygon points="4,0.5 7.5,4 4,7.5 0.5,4" fill={fill} stroke={stroke} strokeWidth={sw} />
+                  <polygon points="11,0.5 14.5,4 11,7.5 7.5,4" fill={fill} stroke={stroke} strokeWidth={sw} />
+                </svg>
+              )
+              if (t.label === "Advanced") return (
+                <svg key={t.label} width="8" height="8" viewBox="0 0 8 8">
+                  <polygon points="4,0.5 7.5,4 4,7.5 0.5,4" fill={fill} stroke={stroke} strokeWidth={sw} />
+                </svg>
+              )
+              if (t.label === "Intermediate") return (
+                <svg key={t.label} width="8" height="8" viewBox="0 0 8 8">
+                  <rect x="0.5" y="0.5" width="7" height="7" fill={fill} stroke={stroke} strokeWidth={sw} />
+                </svg>
+              )
+              return (
+                <svg key={t.label} width="8" height="8" viewBox="0 0 8 8">
+                  <circle cx="4" cy="4" r="3.5" fill={fill} stroke={stroke} strokeWidth={sw} />
+                </svg>
+              )
+            })}
+          </button>
+          <button
+            onClick={() => setMobilePanel(p => p === "settings" ? null : "settings")}
+            className={`p-1.5 rounded border transition-colors ${mobilePanel === "settings" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200"}`}
+            title="Settings"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="2" y1="5" x2="14" y2="5" />
+              <circle cx="5.5" cy="5" r="2" fill="white" strokeWidth="1.5" />
+              <line x1="2" y1="11" x2="14" y2="11" />
+              <circle cx="10.5" cy="11" r="2" fill="white" strokeWidth="1.5" />
+            </svg>
+          </button>
         </div>
       </header>
 
+      {/* Mobile: backdrop */}
+      {mobilePanel && (
+        <div
+          className="fixed inset-0 z-[1999] bg-black/30 md:hidden"
+          onClick={() => setMobilePanel(null)}
+        />
+      )}
+
+      {/* Mobile: list panel (slides in from left) */}
+      {mobilePanel === "list" && (
+        <div className="fixed inset-y-0 left-0 w-72 z-[2000] bg-white shadow-xl overflow-y-auto text-xs md:hidden">
+          {runListContent}
+        </div>
+      )}
+
+      {/* Mobile: filters panel (bottom sheet) */}
+      {mobilePanel === "filters" && (
+        <div className="fixed bottom-0 left-0 right-0 z-[2000] bg-white shadow-xl px-4 pt-3 pb-8 md:hidden">
+          <div className="text-xs font-semibold text-gray-500 mb-3">Difficulty</div>
+          {tierFilterContent}
+        </div>
+      )}
+
+      {/* Mobile: settings panel (bottom sheet) */}
+      {mobilePanel === "settings" && (
+        <div className="fixed bottom-0 left-0 right-0 z-[2000] bg-white shadow-xl px-4 pt-3 pb-8 md:hidden">
+          <div className="text-xs font-semibold text-gray-500 mb-3">Settings</div>
+          {settingsContent}
+        </div>
+      )}
+
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Run list */}
-        <div className="w-60 shrink-0 border-r border-gray-100 overflow-y-auto text-xs">
-          {loading && (
-            <div className="flex items-center justify-center h-20 text-gray-400">Loading…</div>
-          )}
-          {grouped.map(({ tier, runs: tierRuns }) => (
-            <div key={tier.label}>
-              <div
-                className="px-3 py-1 font-semibold text-xs border-b"
-                style={{ color: tier.color, background: tier.color + "12", borderColor: tier.color + "33" }}
-              >
-                {tier.label} {tier.min > 0 ? `≥ ${tier.min}°` : ""}
-              </div>
-              {tierRuns.map((run, i) => {
-                const isPinned  = effectivePin === run.name
-                const isHovered = hovered   === run.name
-                return (
-                  <div
-                    key={`${run.name}-${i}`}
-                    data-run={run.name}
-                    className={`flex items-center gap-2 px-3 cursor-pointer transition-all ${
-                      isPinned ? "py-2.5" : "py-1.5"
-                    }`}
-                    style={{
-                      background: isPinned ? "#fef9c3" : isHovered ? "#f3f4f6" : undefined,
-                    }}
-                    onMouseEnter={() => setHovered(run.name)}
-                    onMouseLeave={() => setHovered(null)}
-                    onClick={() => handleRunClick(run.name)}
-                  >
-                    <span className={`flex-1 truncate text-gray-700 transition-all ${isPinned ? "font-bold text-sm" : ""}`}>
-                      {run.name}
-                    </span>
-                    {run.is_traverse && (
-                      <span className="text-amber-400 text-xs shrink-0" title={`face ${run.face_steepest?.toFixed(1)}°`}>▲</span>
-                    )}
-                    <span className={`shrink-0 font-medium tabular-nums transition-all ${isPinned ? "text-sm" : ""}`} style={{ color: tier.color }}>
-                      {run.steepest.toFixed(1)}°
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
+        {/* Run list — desktop only */}
+        <div className="hidden md:block w-60 shrink-0 border-r border-gray-100 overflow-y-auto text-xs">
+          {runListContent}
         </div>
 
         {/* Map — always mounted to avoid Leaflet DOM teardown errors */}
@@ -352,26 +464,25 @@ export default function MapPage() {
             dimmedRuns={dimmedByDelta}
             useFace={useFace}
             chartHoverCoord={chartHoverCoord}
+            bearing={bearing}
           />
           {/* Slope profile chart overlay */}
           {effectivePin && mounted && (() => {
             const segments   = runs.filter(r => r.name === effectivePin)
             const profile    = buildProfile(segments, useFace)
             const run0       = segments[0]
-            const tier       = tierFor(run0?.steepest ?? 0)
+            const tier       = tierFor(run0 ? effectiveSteepest(run0) : 0)
             const totalKm    = profile.length > 0 ? profile[profile.length - 1].dist : 0
-            const faceDelta  = run0?.face_steepest != null ? run0.face_steepest - run0.steepest : null
+            const lineDelta  = run0 ? effectiveSteepest(run0) - run0.steepest : null
             return (
               <div className="absolute bottom-0 left-0 right-0 bg-white/95 border-t border-gray-200 z-[1000] px-4 pt-2 pb-1" style={{ backdropFilter: "blur(4px)" }}>
                 <div className="flex items-baseline gap-2">
+                  {run0?.osm_difficulty && <PisteBadge difficulty={run0.osm_difficulty} />}
                   <span className="text-xs font-bold text-gray-800">{effectivePin}</span>
-                  <span className="text-xs font-bold" style={{ color: tier.color }}>{run0?.steepest.toFixed(1)}°</span>
-                  {run0?.face_steepest != null && (
+                  <span className="text-xs font-bold" style={{ color: tier.color }}>{run0 ? effectiveSteepest(run0).toFixed(1) : ""}°</span>
+                  {run0 && lineDelta != null && lineDelta >= 1 && (
                     <span className="text-xs text-gray-400">
-                      face {run0.face_steepest.toFixed(1)}°
-                      {faceDelta != null && faceDelta >= 1 && (
-                        <span style={{ color: run0.is_traverse ? "#f59e0b" : "#6b7280" }}> (+{faceDelta.toFixed(1)}°)</span>
-                      )}
+                      line {run0.steepest.toFixed(1)}°
                     </span>
                   )}
                   <span className="text-xs text-gray-400">{totalKm.toFixed(2)} km</span>
