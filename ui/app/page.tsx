@@ -321,7 +321,7 @@ export default function MapPage() {
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0 text-sm">
+      <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0 text-sm" style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}>
         <img src="/icon-192.png" alt="SlopesDB" className="h-7 w-7 rounded-lg" />
 
         <select

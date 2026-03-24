@@ -122,7 +122,7 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Top bar */}
-      <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0">
+      <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0" style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}>
         <h1 className="text-sm font-bold text-gray-800">Ski Run Comparison</h1>
         <Link href="/" className="text-xs text-gray-400 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5">Map →</Link>
 
