@@ -356,9 +356,15 @@ export default function MapPage() {
 
         {/* Mobile: icon buttons */}
         <div className="flex md:hidden ml-auto items-center gap-1">
+          <Link href="/chart" className="p-1.5 rounded text-gray-400 hover:text-gray-700 transition-colors" title="Compare resorts">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <rect x="1" y="3" width="5" height="10" rx="0.5" />
+              <rect x="10" y="3" width="5" height="10" rx="0.5" />
+            </svg>
+          </Link>
           <button
             onClick={() => setMobilePanel(p => p === "list" ? null : "list")}
-            className={`p-1.5 rounded border transition-colors ${mobilePanel === "list" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200"}`}
+            className={`p-1.5 rounded transition-colors ${mobilePanel === "list" ? "bg-gray-800 text-white" : "text-gray-500"}`}
             title="Run list"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -369,7 +375,7 @@ export default function MapPage() {
           </button>
           <button
             onClick={() => setMobilePanel(p => p === "filters" ? null : "filters")}
-            className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded border transition-colors ${mobilePanel === "filters" ? "border-gray-400 bg-gray-50" : "border-gray-200"}`}
+            className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded transition-colors ${mobilePanel === "filters" ? "bg-gray-50" : ""}`}
             title="Difficulty filters"
           >
             {TIERS.map(t => {
@@ -402,7 +408,7 @@ export default function MapPage() {
           </button>
           <button
             onClick={() => setMobilePanel(p => p === "settings" ? null : "settings")}
-            className={`p-1.5 rounded border transition-colors ${mobilePanel === "settings" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200"}`}
+            className={`p-1.5 rounded transition-colors ${mobilePanel === "settings" ? "bg-gray-800 text-white" : "text-gray-500"}`}
             title="Settings"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
