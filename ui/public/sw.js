@@ -5,7 +5,12 @@ const MAX_TILES = 500
 
 self.addEventListener('install', e => {
   self.skipWaiting()
-  e.waitUntil(caches.open(DATA).then(c => c.add('/data/index.json')))
+  e.waitUntil(
+    Promise.all([
+      caches.open(DATA).then(c => c.add('/data/index.json')),
+      caches.open(SHELL).then(c => c.addAll(['/icon-192.png', '/apple-touch-icon.png'])),
+    ])
+  )
 })
 
 self.addEventListener('activate', e => {
@@ -19,7 +24,9 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url)
-  if (url.hostname === 'tile.opentopomap.org') {
+  if (['/icon-192.png', '/apple-touch-icon.png'].includes(url.pathname)) {
+    e.respondWith(cacheFirst(SHELL, e.request))
+  } else if (url.hostname === 'tile.opentopomap.org') {
     e.respondWith(tileFirst(e.request))
   } else if (url.pathname.startsWith('/_next/static/')) {
     e.respondWith(cacheFirst(SHELL, e.request))
