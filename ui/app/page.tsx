@@ -104,7 +104,6 @@ export default function MapPage() {
   const [hiddenTiers, setHiddenTiers]         = useState<Set<string>>(new Set())
   const [chartHoverCoord, setChartHoverCoord] = useState<[number, number] | null>(null)
   const [useFace, setUseFace]                 = useState(true)
-  const [minDelta, setMinDelta]               = useState(0)
   const [mobilePanel, setMobilePanel] = useState<"list" | "filters" | "settings" | null>(null)
   const [bearing, setBearing]         = useState(180)
   const [showLocation, setShowLocation] = useState(false)
@@ -121,7 +120,6 @@ export default function MapPage() {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length) setHiddenTiers(new Set(prefs.hiddenTiers))
       if (typeof prefs.useFace    === "boolean") setUseFace(prefs.useFace)
-      if (typeof prefs.minDelta   === "number")  setMinDelta(prefs.minDelta)
       if (typeof prefs.bearing    === "number")  setBearing(prefs.bearing)
       if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
     } catch {}
@@ -140,12 +138,11 @@ export default function MapPage() {
         ...prefs,
         hiddenTiers: Array.from(hiddenTiers),
         useFace,
-        minDelta,
         bearing,
         showLocation,
       }))
     } catch {}
-  }, [hiddenTiers, useFace, minDelta, bearing, showLocation, mounted])
+  }, [hiddenTiers, useFace, bearing, showLocation, mounted])
 
   function toggleTier(label: string) {
     setHiddenTiers(prev => {
@@ -210,13 +207,6 @@ export default function MapPage() {
   const pinnedRunData  = pinnedRun ? runs.find(r => r.name === pinnedRun) : undefined
   const effectivePin   = pinnedRunData && hiddenTiers.has(tierFor(effectiveSteepest(pinnedRunData)).label) ? null : pinnedRun
 
-  const dimmedByDelta = new Set(
-    minDelta > 0
-      ? runs
-          .filter(r => r.face_steepest != null && (r.face_steepest - effectiveSteepest(r)) < minDelta)
-          .map(r => r.name)
-      : []
-  )
 
   const uniqueRuns = Array.from(
     runs.reduce((map, r) => {
@@ -230,8 +220,7 @@ export default function MapPage() {
     tier,
     runs: uniqueRuns.filter(r =>
       tierFor(effectiveSteepest(r)).label === tier.label &&
-      !hiddenTiers.has(tier.label) &&
-      !dimmedByDelta.has(r.name)
+      !hiddenTiers.has(tier.label)
     ),
   })).filter(g => g.runs.length > 0)
 
@@ -315,14 +304,7 @@ export default function MapPage() {
 
   const settingsContent = (
     <div className="flex items-center gap-2">
-      <span className="text-gray-400 text-xs">Δ≥</span>
-      <input
-        type="range" min={0} max={20} step={1} value={minDelta}
-        onChange={e => setMinDelta(Number(e.target.value))}
-        className="w-20 accent-gray-700"
-      />
-      <span className="tabular-nums text-xs text-gray-600 w-5">{minDelta}°</span>
-      <div className="flex gap-0.5 ml-1">
+      <div className="flex gap-0.5">
         {(["Face", "Line"] as const).map(mode => (
           <button
             key={mode}
@@ -467,7 +449,7 @@ export default function MapPage() {
 
       {/* Mobile: list panel (slides in from left) */}
       {mobilePanel === "list" && (
-        <div className="fixed inset-y-0 left-0 w-72 z-[2000] bg-white shadow-xl overflow-y-auto text-xs md:hidden">
+        <div className="fixed inset-y-0 left-0 w-72 z-[2000] bg-white shadow-xl overflow-y-auto text-xs md:hidden" style={{ paddingTop: "max(0px, env(safe-area-inset-top))" }}>
           {runListContent}
         </div>
       )}
@@ -512,7 +494,6 @@ export default function MapPage() {
             onRunClick={handleRunClick}
             focusRun={effectivePin}
             hiddenTiers={hiddenTiers}
-            dimmedRuns={dimmedByDelta}
             useFace={useFace}
             chartHoverCoord={chartHoverCoord}
             bearing={bearing}

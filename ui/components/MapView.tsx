@@ -43,7 +43,6 @@ interface Props {
   onRunClick: (name: string) => void
   focusRun: string | null
   hiddenTiers?: Set<string>
-  dimmedRuns?: Set<string>
   useFace?: boolean
   chartHoverCoord?: [number, number] | null  // [lon, lat]
   bearing?: number
@@ -226,7 +225,7 @@ function FitBounds({ runs }: { runs: RunGeo[] }) {
 
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, dimmedRuns, useFace = true, chartHoverCoord, bearing = 180, userLocation }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -297,9 +296,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Dimmed line runs — tier-hidden or delta-filtered, rendered before active */}
-      {runs.filter(r => !r.is_area && (
-        (hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false) || (dimmedRuns?.has(r.name) ?? false)
-      )).map((run, di) => {
+      {runs.filter(r => !r.is_area && (hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map((run, di) => {
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
           <Polyline
@@ -316,7 +313,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Active line runs — rendered after dimmed so they appear on top */}
-      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false) && !(dimmedRuns?.has(r.name) ?? false)).map(run => {
+      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map(run => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
         const slopes    = useFace ? run.slopes : (run.line_slopes ?? run.slopes)
