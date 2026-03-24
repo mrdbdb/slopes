@@ -322,7 +322,7 @@ export default function MapPage() {
     <div className="flex flex-col h-screen bg-white">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 shrink-0 text-sm">
-        <span className="font-bold text-gray-800">SlopesDB</span>
+        <img src="/icon-192.png" alt="SlopesDB" className="h-7 w-7 rounded-lg" />
 
         <select
           value={slug}
