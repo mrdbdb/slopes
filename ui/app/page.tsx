@@ -120,6 +120,10 @@ export default function MapPage() {
       if (saved) setSlug(saved)
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length) setHiddenTiers(new Set(prefs.hiddenTiers))
+      if (typeof prefs.useFace    === "boolean") setUseFace(prefs.useFace)
+      if (typeof prefs.minDelta   === "number")  setMinDelta(prefs.minDelta)
+      if (typeof prefs.bearing    === "number")  setBearing(prefs.bearing)
+      if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
     } catch {}
   }, [])
 
@@ -132,9 +136,16 @@ export default function MapPage() {
     if (!mounted) return
     try {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
-      localStorage.setItem("ski-prefs", JSON.stringify({ ...prefs, hiddenTiers: Array.from(hiddenTiers) }))
+      localStorage.setItem("ski-prefs", JSON.stringify({
+        ...prefs,
+        hiddenTiers: Array.from(hiddenTiers),
+        useFace,
+        minDelta,
+        bearing,
+        showLocation,
+      }))
     } catch {}
-  }, [hiddenTiers, mounted])
+  }, [hiddenTiers, useFace, minDelta, bearing, showLocation, mounted])
 
   function toggleTier(label: string) {
     setHiddenTiers(prev => {
