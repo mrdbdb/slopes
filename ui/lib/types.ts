@@ -35,6 +35,7 @@ const OSM_DIFFICULTY_FLOOR: Record<string, number> = {
   intermediate: 18,
   advanced:     27,
   expert:       36,
+  freeride:     36,
 }
 
 export function effectiveSteepest(run: { steepest: number; face_steepest?: number; is_traverse?: boolean; osm_difficulty?: string }): number {
