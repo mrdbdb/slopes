@@ -226,3 +226,10 @@ The pipeline is split into modules under `pipeline/`:
 | `pipeline/profile.py` | Geometry utilities and slope-profile computation |
 | `pipeline/export.py` | UI JSON, GeoJSON map data, lift export, static chart |
 | `slopesdb_pipeline.py` | `RESORTS` config + `main()` entry point |
+
+## Change log
+
+### 2026-03-25
+- **Fix Laax classification (green runs pushed to Expert):** Two root causes identified and fixed:
+  1. DEM bbox `(46.82,9.10,46.89,9.28)` was too tight — 15 runs extend south of lat 46.82 or east of lon 9.28, causing out-of-bounds DEM samples (returning `None`) and elevation discontinuities at gap boundaries that spiked to 55°. Expanded to `(46.79,9.08,46.90,9.30)`.
+  2. Area polygon runs (OSM ways where first == last node) used `_dp_steepest_30m_area`, which finds the steepest possible 30m pitch anywhere in the polygon — including cliff edges at the boundary. Dropped `dp_steepest` for area runs so they use the same centerline-path + face measurement as line runs. Result: easy runs went from 14/62 Expert to 0/62 Expert.
