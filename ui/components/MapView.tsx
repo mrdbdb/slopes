@@ -273,7 +273,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
         const isDimmed  = hiddenTiers?.has(tierFor(effectiveSteepest(run)).label) ?? false
-        const color = isDimmed ? DIM_COLOR : slopeColor(run.steepest)
+        const color = isDimmed ? DIM_COLOR : slopeColor(effectiveSteepest(run))
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
           <Polygon

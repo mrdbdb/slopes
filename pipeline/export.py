@@ -159,14 +159,20 @@ def export_for_ui(all_results_by_smooth: dict, resorts: list) -> None:
 
     osm_id_by_resort         = {}
     osm_difficulty_by_resort = {}
+    is_area_by_resort        = {}
     for resort in resorts:
         osm_runs = load_json_cache(resort["name"]) or []
         osm_id_by_resort[resort["name"]]         = {r["name"]: r["id"] for r in osm_runs}
         osm_difficulty_by_resort[resort["name"]] = {r["name"]: r.get("osm_difficulty") for r in osm_runs}
+        is_area_by_resort[resort["name"]]        = {
+            r["name"]: len(r["coords"]) > 2 and r["coords"][0] == r["coords"][-1]
+            for r in osm_runs
+        }
 
     index = [
         {"name": r["name"], "slug": r["name"].lower().replace(" ", "_"),
-         "color": r["color"], "smooth_levels": SMOOTH_LEVELS}
+         "color": r["color"], "smooth_levels": SMOOTH_LEVELS,
+         "default_bearing": r.get("default_bearing", 180)}
         for r in resorts
     ]
     with open(os.path.join(UI_DATA_DIR, "index.json"), "w") as f:
@@ -178,6 +184,7 @@ def export_for_ui(all_results_by_smooth: dict, resorts: list) -> None:
         slug   = name.lower().replace(" ", "_")
         osm_id_by_name         = osm_id_by_resort.get(name, {})
         osm_difficulty_by_name = osm_difficulty_by_resort.get(name, {})
+        is_area_by_name        = is_area_by_resort.get(name, {})
 
         if not any(name in results for results in all_results_by_smooth.values()):
             continue
@@ -218,6 +225,8 @@ def export_for_ui(all_results_by_smooth: dict, resorts: list) -> None:
                 osm_diff = osm_difficulty_by_name.get(run_name)
                 if osm_diff:
                     run_entry["osm_difficulty"] = osm_diff
+                if is_area_by_name.get(run_name):
+                    run_entry["is_area"] = True
                 runs_out.append(run_entry)
 
             out_path = os.path.join(UI_DATA_DIR, f"{slug}_s{smooth_pts}.json")

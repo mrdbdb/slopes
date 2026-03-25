@@ -4,6 +4,7 @@ export interface RunProfile {
   face_steepest?: number
   face_delta?: number
   is_traverse?: boolean
+  is_area?: boolean
   length_km: number
   profile: [number, number][] // [dist_km, slope_deg]
   osm_id?: number
@@ -38,7 +39,7 @@ const OSM_DIFFICULTY_FLOOR: Record<string, number> = {
   freeride:     36,
 }
 
-export function effectiveSteepest(run: { steepest: number; face_steepest?: number; is_traverse?: boolean; osm_difficulty?: string }): number {
+export function effectiveSteepest(run: { steepest: number; face_steepest?: number; is_traverse?: boolean; is_area?: boolean; osm_difficulty?: string }): number {
   // For traverses, face comes from terrain beside the skier — use line steepness only.
   // For non-traverses, face reflects terrain underfoot and may exceed line (e.g. short
   // steep rolls), so take the max.
