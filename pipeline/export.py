@@ -363,7 +363,7 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list,
         use_face      = face_slp is not None and len(face_trim) == len(slopes_smooth)
         display_slopes = np.maximum(face_trim, slopes_smooth) if use_face else slopes_smooth
 
-        step    = GEO_SEGMENT_STEP
+        step    = max(1, GEO_SEGMENT_STEP * SAMPLE_SPACING_M // spacing_m)
         indices = list(range(0, len(display_slopes), step))
         seg_slopes = [
             round(float(np.max(display_slopes[i: i + step])), 1)
