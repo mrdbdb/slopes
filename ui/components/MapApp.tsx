@@ -11,7 +11,7 @@ import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tool
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false })
 
-interface ResortMeta { name: string; slug: string; color: string }
+interface ResortMeta { name: string; slug: string; color: string; default_bearing?: number }
 
 interface GeoJSON {
   resort: string
@@ -129,8 +129,7 @@ export default function MapApp() {
       }
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length) setHiddenTiers(new Set(prefs.hiddenTiers))
-      if (typeof prefs.useFace    === "boolean") setUseFace(prefs.useFace)
-      if (typeof prefs.bearing    === "number")  setBearing(prefs.bearing)
+      if (typeof prefs.useFace      === "boolean") setUseFace(prefs.useFace)
       if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
     } catch {}
   }, [])
@@ -141,18 +140,32 @@ export default function MapApp() {
   }, [slug, mounted])
 
   useEffect(() => {
+    if (!mounted || resorts.length === 0) return
+    const resort = resorts.find(r => r.slug === slug)
+    const defaultBearing = resort?.default_bearing ?? 180
+    try {
+      const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
+      const bearings: Record<string, number> = prefs.bearings ?? {}
+      setBearing(slug in bearings ? bearings[slug] : defaultBearing)
+    } catch {
+      setBearing(defaultBearing)
+    }
+  }, [slug, resorts, mounted])
+
+  useEffect(() => {
     if (!mounted) return
     try {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
+      const bearings = { ...(prefs.bearings ?? {}), [slug]: bearing }
       localStorage.setItem("ski-prefs", JSON.stringify({
         ...prefs,
         hiddenTiers: Array.from(hiddenTiers),
         useFace,
-        bearing,
+        bearings,
         showLocation,
       }))
     } catch {}
-  }, [hiddenTiers, useFace, bearing, showLocation, mounted])
+  }, [hiddenTiers, useFace, bearing, showLocation, mounted, slug])
 
   function toggleTier(label: string) {
     setHiddenTiers(prev => {

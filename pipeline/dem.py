@@ -9,7 +9,7 @@ import requests
 import rasterio
 
 from .constants import (
-    CACHE_DIR, USGS_WCS_URL, COPERNICUS_S3, SWISSTOPO_STAC,
+    CACHE_DIR, USGS_WCS_URL, COPERNICUS_S3, SWISSTOPO_STAC, GSI_DEM_URL,
 )
 from .cache import dem_path_for  # noqa: re-exported for callers
 
@@ -324,6 +324,199 @@ def _pick_swisstopo_asset(item: dict) -> str | None:
     if tif_assets:
         return next(iter(tif_assets.values()))["href"]
     return None
+
+
+# ── GSI DEM5A (Japan) ─────────────────────────────────────────────────────────
+
+_GSI_ZOOM     = 15
+_GSI_ORIGIN_M = 20037508.342789244   # half Earth circumference in EPSG:3857 metres
+_GSI_NODATA   = -9999.0
+
+
+def _latlon_to_tile(lat_deg: float, lon_deg: float, z: int) -> tuple[int, int]:
+    n     = 2 ** z
+    x     = int((lon_deg + 180.0) / 360.0 * n)
+    lat_r = math.radians(lat_deg)
+    y     = int((1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n)
+    return x, y
+
+
+def _tile_bbox_3857(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    tile_m = 2 * _GSI_ORIGIN_M / (2 ** z)
+    west   = -_GSI_ORIGIN_M + x * tile_m
+    north  =  _GSI_ORIGIN_M - y * tile_m
+    return west, north - tile_m, west + tile_m, north   # (W, S, E, N)
+
+
+def _decode_gsi_png(png_bytes: bytes) -> np.ndarray:
+    """Decode a GSI elevation PNG into a (256×256) float32 array (metres).
+
+    Encoding: x = R*65536 + G*256 + B
+      x < 2^23  → elevation =  x * 0.01 m
+      x > 2^23  → elevation = (x - 2^24) * 0.01 m   (negative terrain)
+      x == 2^23 → no-data
+    """
+    with rasterio.MemoryFile(png_bytes) as mf:
+        with mf.open() as src:
+            data = src.read()
+    r = data[0].astype(np.int32)
+    g = data[1].astype(np.int32)
+    b = data[2].astype(np.int32)
+    x = r * 65536 + g * 256 + b
+    elev = np.where(x < 2**23, x * 0.01, (x - 2**24) * 0.01).astype(np.float32)
+    elev[x == 2**23] = _GSI_NODATA
+    return elev
+
+
+def _save_gsi_tile(path: str, elev: np.ndarray, z: int, tx: int, ty: int) -> None:
+    from rasterio.transform import from_bounds
+    tile_w, tile_s, tile_e, tile_n = _tile_bbox_3857(z, tx, ty)
+    tile_tf = from_bounds(tile_w, tile_s, tile_e, tile_n, 256, 256)
+    with rasterio.open(
+        path, "w",
+        driver="GTiff", height=256, width=256,
+        count=1, dtype=np.float32, crs="EPSG:3857",
+        transform=tile_tf, nodata=_GSI_NODATA,
+    ) as dst:
+        dst.write(elev[np.newaxis])
+
+
+def _fetch_gsi_tile(z: int, tx: int, ty: int) -> str | None:
+    """Return path to a cached GeoTIFF for tile (z, tx, ty).
+
+    Tries DEM5A then DEM5B at zoom z. If both 404, falls back to the parent
+    dem_png tile at zoom z-1, resampled to the zoom-z tile bounds.
+    Returns None only if no data source is available.
+    """
+    from rasterio.transform import from_bounds
+    from rasterio.warp import reproject, Resampling
+
+    tile_cache = os.path.join(CACHE_DIR, f"gsi_{z}_{tx}_{ty}.tif")
+    if os.path.exists(tile_cache):
+        return tile_cache
+
+    for layer in ("dem5a_png", "dem5b_png"):
+        try:
+            resp = requests.get(f"{GSI_DEM_URL}/{layer}/{z}/{tx}/{ty}.png", timeout=30)
+            if resp.status_code == 200:
+                elev = _decode_gsi_png(resp.content)
+                _save_gsi_tile(tile_cache, elev, z, tx, ty)
+                return tile_cache
+        except Exception:
+            continue
+
+    # Fallback: zoom-(z-1) dem_png tile, resampled to zoom-z bounds
+    z14, tx14, ty14 = z - 1, tx // 2, ty // 2
+    parent_cache = os.path.join(CACHE_DIR, f"gsi_dem_png_{z14}_{tx14}_{ty14}.tif")
+    if not os.path.exists(parent_cache):
+        try:
+            resp = requests.get(f"{GSI_DEM_URL}/dem_png/{z14}/{tx14}/{ty14}.png", timeout=30)
+            if resp.status_code != 200:
+                return None
+            elev14 = _decode_gsi_png(resp.content)
+            _save_gsi_tile(parent_cache, elev14, z14, tx14, ty14)
+        except Exception:
+            return None
+
+    tile_w, tile_s, tile_e, tile_n = _tile_bbox_3857(z, tx, ty)
+    tile_tf = from_bounds(tile_w, tile_s, tile_e, tile_n, 256, 256)
+    out_data = np.full((1, 256, 256), _GSI_NODATA, dtype=np.float32)
+    with rasterio.open(parent_cache) as src:
+        reproject(
+            source=rasterio.band(src, 1), destination=out_data,
+            src_transform=src.transform, src_crs=src.crs,
+            dst_transform=tile_tf, dst_crs="EPSG:3857",
+            resampling=Resampling.bilinear,
+            src_nodata=_GSI_NODATA, dst_nodata=_GSI_NODATA,
+        )
+    with rasterio.open(
+        tile_cache, "w",
+        driver="GTiff", height=256, width=256,
+        count=1, dtype=np.float32, crs="EPSG:3857",
+        transform=tile_tf, nodata=_GSI_NODATA,
+    ) as dst:
+        dst.write(out_data)
+    return tile_cache
+
+
+def download_dem_gsi(bbox_wsen: tuple, output_path: str, resolution_m: int = 5):
+    """
+    Download GSI DEM for Japan via PNG tiles, merge, reproject to WGS84.
+
+    Per-tile priority: DEM5A zoom 15 (~5m) → DEM5B zoom 15 → dem_png zoom 14
+    (~10m, nationwide coverage) resampled to zoom-15 bounds. This ensures full
+    mountain coverage even where LiDAR/photogrammetry 5m data is absent.
+    Tiles are cached as CACHE_DIR/gsi_15_{x}_{y}.tif.
+    bbox_wsen: (west, south, east, north) in WGS-84 degrees.
+    """
+    from rasterio.merge import merge as rio_merge
+    from rasterio.warp import reproject, Resampling
+    from rasterio.transform import from_bounds
+
+    west, south, east, north = bbox_wsen
+    lat_c     = (south + north) / 2
+    width_m   = (east - west)  * 111_000 * math.cos(math.radians(lat_c))
+    height_m  = (north - south) * 111_000
+    width_px  = max(100, int(width_m  / resolution_m))
+    height_px = max(100, int(height_m / resolution_m))
+
+    z          = _GSI_ZOOM
+    max_tile   = 2**z - 1
+    x_west, y_north = _latlon_to_tile(north, west, z)
+    x_east, y_south = _latlon_to_tile(south, east, z)
+    x_west  = max(0, min(x_west,  max_tile))
+    x_east  = max(0, min(x_east,  max_tile))
+    y_north = max(0, min(y_north, max_tile))
+    y_south = max(0, min(y_south, max_tile))
+
+    total = (x_east - x_west + 1) * (y_south - y_north + 1)
+    print(f"  Downloading GSI DEM ({total} tiles at zoom {z}) …", flush=True)
+
+    tile_paths = []
+    done = 0
+    for ty in range(y_north, y_south + 1):
+        for tx in range(x_west, x_east + 1):
+            path = _fetch_gsi_tile(z, tx, ty)
+            if path:
+                tile_paths.append(path)
+            done += 1
+            if done % 50 == 0 or done == total:
+                print(f"    {done}/{total} tiles …", flush=True)
+
+    if not tile_paths:
+        raise RuntimeError("No GSI DEM tiles could be downloaded")
+
+    sources = [rasterio.open(p) for p in tile_paths]
+    try:
+        if len(sources) > 1:
+            merged_data, merged_transform = rio_merge(sources, nodata=_GSI_NODATA)
+        else:
+            merged_data      = sources[0].read()
+            merged_transform = sources[0].transform
+        src_crs = sources[0].crs
+    finally:
+        for s in sources:
+            s.close()
+
+    out_transform = from_bounds(west, south, east, north, width_px, height_px)
+    out_data      = np.full((1, height_px, width_px), _GSI_NODATA, dtype=np.float32)
+
+    reproject(
+        source=merged_data, destination=out_data,
+        src_transform=merged_transform, src_crs=src_crs,
+        dst_transform=out_transform, dst_crs="EPSG:4326",
+        resampling=Resampling.bilinear,
+        src_nodata=_GSI_NODATA, dst_nodata=_GSI_NODATA,
+    )
+
+    with rasterio.open(
+        output_path, "w",
+        driver="GTiff", height=height_px, width=width_px,
+        count=1, dtype=np.float32, crs="EPSG:4326",
+        transform=out_transform, nodata=_GSI_NODATA,
+    ) as dst:
+        dst.write(out_data)
+    print(f"  Saved → {output_path} ({width_px}×{height_px} px)")
 
 
 # ── DEM sampling ─────────────────────────────────────────────────────────────

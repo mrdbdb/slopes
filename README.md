@@ -43,6 +43,7 @@ On first run this downloads two assets per resort and caches them locally:
   - US resorts: USGS 3DEP via WCS (~2m resolution)
   - Canadian resorts: Copernicus GLO-30 from AWS S3 (30m)
   - Swiss resorts: swissALTI3D from swisstopo STAC API (2m, tiled per km²)
+  - Japanese resorts: GSI DEM5A from cyberjapandata.gsi.go.jp PNG tiles at zoom 15 (~5m, LiDAR-based); falls back to DEM5B per tile
 - **OSM run geometry** — all named `piste:type=downhill` ways via Overpass API (`cache/<Resort>.json`)
 
 Same-name OSM ways whose endpoints are within 50m are automatically stitched into a single run before profiling (e.g. a run mapped as separate upper/lower segments becomes one continuous profile).
@@ -172,7 +173,7 @@ Remaining discrepancies come from:
 
 ## Resorts
 
-Currently configured: **Palisades Tahoe**, **Northstar**, **Sugar Bowl**, **Mount Norquay**, **Sunshine Village**, **Lake Louise**, **Whistler Blackcomb**, and **Laax**.
+Currently configured: **Palisades Tahoe**, **Northstar**, **Sugar Bowl**, **Mount Norquay**, **Sunshine Village**, **Lake Louise**, **Whistler Blackcomb**, **Laax**, and **Niseko United**.
 
 To add a resort, add an entry to `RESORTS` in `slopesdb_pipeline.py`:
 
@@ -208,6 +209,18 @@ Swiss resort (swissALTI3D 2m DEM):
     "color":            "firebrick",
     "dem_source":       "swisstopo",
     "dem_resolution_m": 2,
+}
+```
+
+Japanese resort (GSI DEM5A ~5m DEM):
+```python
+{
+    "name":             "Hakuba Valley",
+    "osm_bbox":         "(36.67,137.82,36.78,137.96)",
+    "dem_bbox":         (137.82, 36.67, 137.96, 36.78),
+    "color":            "deepskyblue",
+    "dem_source":       "gsi",
+    "dem_resolution_m": 5,
 }
 ```
 

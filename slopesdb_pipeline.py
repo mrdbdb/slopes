@@ -20,7 +20,7 @@ import os
 from pipeline.constants import SMOOTH_LEVELS, SMOOTH_POINTS, UI_DATA_DIR
 from pipeline.cache import load_profiles, save_profiles, dem_path_for
 from pipeline.dem import (
-    download_dem, download_dem_copernicus, download_dem_swisstopo,
+    download_dem, download_dem_copernicus, download_dem_swisstopo, download_dem_gsi,
     compute_face_slope_raster, sample_face_slopes,
 )
 from pipeline.osm import fetch_runs, stitch_runs, fetch_spotlio_supplement, fetch_lifts
@@ -98,6 +98,16 @@ RESORTS = [
         "color":            "crimson",
         "dem_source":       "swisstopo",
         "dem_resolution_m": 2,
+        "default_bearing":  0,
+    },
+    {
+        "name":             "Niseko United",
+        "osm_bbox":         "(42.77,140.63,42.88,140.82)",
+        "dem_bbox":         (140.63, 42.77, 140.82, 42.88),
+        "color":            "deepskyblue",
+        "dem_source":       "gsi",
+        "dem_resolution_m": 5,
+        "default_bearing":  0,
     },
 ]
 
@@ -112,6 +122,8 @@ def _download_dem(resort: dict, tif: str) -> None:
         download_dem_copernicus(bbox, tif, res_m)
     elif source == "swisstopo":
         download_dem_swisstopo(bbox, tif, res_m)
+    elif source == "gsi":
+        download_dem_gsi(bbox, tif, res_m)
     else:
         download_dem(bbox, tif, res_m)
 

@@ -22,6 +22,7 @@ USGS_WCS_URL  = (
     "3DEPElevation/ImageServer/WCSServer"
 )
 COPERNICUS_S3    = "https://copernicus-dem-30m.s3.amazonaws.com"
+GSI_DEM_URL      = "https://cyberjapandata.gsi.go.jp/xyz"
 SWISSTOPO_STAC   = (
     "https://data.geo.admin.ch/api/stac/v0.9/collections/"
     "ch.swisstopo.swissalti3d/items"
