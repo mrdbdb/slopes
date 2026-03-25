@@ -109,6 +109,33 @@ RESORTS = [
         "dem_resolution_m": 5,
         "default_bearing":  0,
     },
+    {
+        "name":             "Hakuba Valley",
+        "osm_bbox":         "(36.61,137.81,36.78,137.93)",
+        "dem_bbox":         (137.81, 36.61, 137.93, 36.78),
+        "color":            "mediumslateblue",
+        "dem_source":       "gsi",
+        "dem_resolution_m": 5,
+        "default_bearing":  0,
+    },
+    {
+        "name":             "Gala Yuzawa",
+        "osm_bbox":         "(36.90,138.79,36.96,138.87)",
+        "dem_bbox":         (138.79, 36.90, 138.87, 36.96),
+        "color":            "mediumseagreen",
+        "dem_source":       "gsi",
+        "dem_resolution_m": 5,
+        "default_bearing":  0,
+    },
+    {
+        "name":             "Shiga Kogen",
+        "osm_bbox":         "(36.68,138.38,36.83,138.60)",
+        "dem_bbox":         (138.38, 36.68, 138.60, 36.83),
+        "color":            "darkorchid",
+        "dem_source":       "gsi",
+        "dem_resolution_m": 5,
+        "default_bearing":  0,
+    },
 ]
 
 
