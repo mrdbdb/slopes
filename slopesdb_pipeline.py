@@ -234,7 +234,7 @@ def main():
             print(f"  Lifts cached: {lifts_out}")
 
     # 6. UI JSON
-    export_for_ui(all_results_by_smooth, resorts)
+    export_for_ui(all_results_by_smooth, RESORTS)
 
     # 7. Static chart (only when exactly 2 resorts)
     if len(resorts) != 2:
