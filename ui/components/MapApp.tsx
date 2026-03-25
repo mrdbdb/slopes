@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { TIERS, tierFor, effectiveSteepest } from "@/lib/types"
@@ -93,10 +93,12 @@ function buildProfile(segments: RunGeo[], useFace: boolean): { dist: number; slo
   return points
 }
 
-export default function MapApp({ initialSlug }: { initialSlug?: string }) {
+export default function MapApp() {
   const router = useRouter()
+  const params = useParams()
+  const urlSlug = params?.resort as string | undefined
   const [resorts, setResorts]         = useState<ResortMeta[]>([])
-  const [slug, setSlug]               = useState(initialSlug ?? "palisades_tahoe")
+  const [slug, setSlug]               = useState(urlSlug ?? "palisades_tahoe")
   const [runs, setRuns]               = useState<RunGeo[]>([])
   const [lifts, setLifts]             = useState<LiftGeo[]>([])
   const [loading, setLoading]         = useState(true)
@@ -112,12 +114,16 @@ export default function MapApp({ initialSlug }: { initialSlug?: string }) {
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null)
 
   useEffect(() => {
+    if (urlSlug) setSlug(urlSlug)
+  }, [urlSlug])
+
+  useEffect(() => {
     setMounted(true)
     fetch("/data/index.json").then(r => r.json()).then((data: ResortMeta[]) => {
       setResorts(data)
     })
     try {
-      if (!initialSlug) {
+      if (!urlSlug) {
         const saved = localStorage.getItem("ski-map-slug")
         if (saved) setSlug(saved)
       }
