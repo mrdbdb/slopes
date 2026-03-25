@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import dynamic from "next/dynamic"
@@ -97,6 +97,7 @@ export default function MapApp() {
   const router = useRouter()
   const params = useParams()
   const urlSlug = params?.resort as string | undefined
+  const bearingLoadedForSlug = useRef<string | null>(null)
   const [resorts, setResorts]         = useState<ResortMeta[]>([])
   const [slug, setSlug]               = useState(urlSlug ?? "palisades_tahoe")
   const [runs, setRuns]               = useState<RunGeo[]>([])
@@ -148,14 +149,27 @@ export default function MapApp() {
     try {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       const bearings: Record<string, number> = prefs.bearings ?? {}
-      setBearing(slug in bearings ? bearings[slug] : defaultBearing)
+      const saved = bearings[slug]
+      // Ignore a saved bearing of 180 for a resort that defaults to 0 — it was
+      // written before per-resort bearing was introduced (or before this fix).
+      const useSaved = saved !== undefined && !(saved === 180 && defaultBearing === 0)
+      bearingLoadedForSlug.current = null   // block save until setBearing re-renders
+      setBearing(useSaved ? saved : defaultBearing)
     } catch {
+      bearingLoadedForSlug.current = null
       setBearing(defaultBearing)
     }
   }, [slug, resorts, mounted])
 
   useEffect(() => {
     if (!mounted) return
+    // Gate: only save after the load effect has set the bearing for this slug.
+    // bearingLoadedForSlug is null in the same render that setBearing was called,
+    // so this fires once as a skip (setting the ref), then saves on the next render.
+    if (bearingLoadedForSlug.current !== slug) {
+      bearingLoadedForSlug.current = slug
+      return
+    }
     try {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       const bearings = { ...(prefs.bearings ?? {}), [slug]: bearing }
