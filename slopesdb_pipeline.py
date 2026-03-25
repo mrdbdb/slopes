@@ -93,8 +93,8 @@ RESORTS = [
     },
     {
         "name":             "Laax",
-        "osm_bbox":         "(46.82,9.10,46.89,9.28)",
-        "dem_bbox":         (9.10, 46.82, 9.28, 46.89),
+        "osm_bbox":         "(46.79,9.08,46.90,9.30)",
+        "dem_bbox":         (9.08, 46.79, 9.30, 46.90),
         "color":            "crimson",
         "dem_source":       "swisstopo",
         "dem_resolution_m": 2,
@@ -124,11 +124,11 @@ def _sample_raw(runs: list, tif: str, spacing_m: int):
         c       = run["coords"]
         is_area = len(c) > 2 and c[0] == c[-1]
         if is_area:
-            pts, elevs, dp_steepest = profile_area(c[:-1], tif, spacing_m)
+            pts, elevs, _ = profile_area(c[:-1], tif, spacing_m)
+            dp_steepest = None
             if pts is None:
-                pts         = interpolate_run(c, spacing_m)
-                elevs       = sample_dem(tif, pts)
-                dp_steepest = None
+                pts   = interpolate_run(c, spacing_m)
+                elevs = sample_dem(tif, pts)
         else:
             pts         = interpolate_run(c, spacing_m)
             elevs       = sample_dem(tif, pts)
