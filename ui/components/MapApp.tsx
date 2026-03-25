@@ -119,9 +119,11 @@ export default function MapApp() {
 
   useEffect(() => {
     setMounted(true)
-    fetch("/data/index.json").then(r => r.json()).then((data: ResortMeta[]) => {
-      setResorts(data)
-    })
+    fetch("/data/index.json", { cache: "no-cache" })
+      .catch(() => fetch("/data/index.json", { cache: "force-cache" }))
+      .then(r => r.json()).then((data: ResortMeta[]) => {
+        setResorts(data)
+      })
     try {
       if (!urlSlug) {
         const saved = localStorage.getItem("ski-map-slug")
