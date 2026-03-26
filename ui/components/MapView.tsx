@@ -83,14 +83,15 @@ function normalizeAngle(css: number): number {
   return css
 }
 
-// CSS rotation angle so text aligns with the line direction, accounting for map bearing
-// (leaflet-rotate keeps markers upright, so angles are in screen-space = geo - mapBearing)
+// CSS rotation angle so text aligns with the line direction, accounting for map bearing.
+// Leaflet-rotate applies CSS rotate(+bearing_rad) CW to the tile layer, so a feature's
+// screen angle = north-up angle + mapBearing (not minus).
 function liftAngleDeg(coords: [number, number][], mapBearing: number): number {
   const n = coords.length
   const [lon1, lat1] = coords[Math.max(0, Math.floor(n * 0.25))]
   const [lon2, lat2] = coords[Math.min(n - 1, Math.floor(n * 0.75))]
   const cosLat = Math.cos((lat1 + lat2) / 2 * Math.PI / 180)
-  return normalizeAngle(Math.atan2((lon2 - lon1) * cosLat, lat2 - lat1) * 180 / Math.PI - 90 - mapBearing)
+  return normalizeAngle(Math.atan2((lon2 - lon1) * cosLat, lat2 - lat1) * 180 / Math.PI - 90 + mapBearing)
 }
 
 function liftMid(coords: [number, number][]): [number, number] {
@@ -154,7 +155,7 @@ function runAngleDeg(coords: [number, number][], mapBearing: number): number {
   const [lon1, lat1] = coords[Math.max(0, Math.floor(n * 0.25))]
   const [lon2, lat2] = coords[Math.min(n - 1, Math.floor(n * 0.75))]
   const cosLat = Math.cos((lat1 + lat2) / 2 * Math.PI / 180)
-  return normalizeAngle(Math.atan2((lon2 - lon1) * cosLat, lat2 - lat1) * 180 / Math.PI - 90 - mapBearing)
+  return normalizeAngle(Math.atan2((lon2 - lon1) * cosLat, lat2 - lat1) * 180 / Math.PI - 90 + mapBearing)
 }
 
 function RunLabels({ runs, hovered, pinned, bearing, hiddenTiers }: { runs: RunGeo[]; hovered: string | null; pinned: string | null; bearing: number; hiddenTiers?: Set<string> }) {
