@@ -64,3 +64,17 @@ def save_profiles(name: str, smooth_pts: int, results: list) -> None:
 def dem_path_for(name: str, resolution_m: int) -> str:
     os.makedirs(CACHE_DIR, exist_ok=True)
     return _cache_path(f"{name}_{resolution_m}m", "tif")
+
+
+def load_bearing(name: str) -> int | None:
+    path = _cache_path(f"{name}_bearing", "json")
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+def save_bearing(name: str, bearing: int) -> None:
+    path = _cache_path(f"{name}_bearing", "json")
+    with open(path, "w") as f:
+        json.dump(bearing, f)

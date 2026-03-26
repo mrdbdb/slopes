@@ -269,3 +269,54 @@ def get_steepest(slope_deg: np.ndarray | None, override: float | None,
     if slope_deg is None:
         return 0.0
     return steepest_30m(slope_deg, spacing_m)
+
+
+# ── Dominant run bearing ───────────────────────────────────────────────────────
+
+def dominant_run_bearing(raw_samples: list) -> int:
+    """
+    Compute the map bearing (0-359°) so the majority of runs appear to flow downward.
+
+    For each run, compares elevation at both endpoints to find the downhill direction,
+    then computes a length-weighted circular mean across all runs. Returns
+    (mean_downhill_bearing + 180) % 360 so the uphill direction sits at the top
+    of the screen.
+
+    raw_samples: list of (run_name, pts, elevs, dp_steepest, face_slp) from _sample_raw.
+    """
+    sin_sum = cos_sum = weight_sum = 0.0
+
+    for _, pts, elevs, _, _ in raw_samples:
+        if pts is None or elevs is None or len(pts) < 2:
+            continue
+
+        start_elev = next((e for e in elevs if e is not None), None)
+        end_elev   = next((e for e in reversed(elevs) if e is not None), None)
+        if start_elev is None or end_elev is None or abs(start_elev - end_elev) < 5:
+            continue
+
+        if start_elev > end_elev:
+            lat_from, lon_from = pts[0]
+            lat_to,   lon_to   = pts[-1]
+        else:
+            lat_from, lon_from = pts[-1]
+            lat_to,   lon_to   = pts[0]
+
+        dlon  = math.radians(lon_to - lon_from)
+        lat1r = math.radians(lat_from)
+        lat2r = math.radians(lat_to)
+        x = math.sin(dlon) * math.cos(lat2r)
+        y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
+        b_rad = math.atan2(x, y)
+
+        weight     = len(pts)
+        sin_sum   += math.sin(b_rad) * weight
+        cos_sum   += math.cos(b_rad) * weight
+        weight_sum += weight
+
+    if weight_sum == 0:
+        return 180
+
+    mean_downhill = (math.degrees(math.atan2(sin_sum / weight_sum,
+                                             cos_sum / weight_sum)) + 360) % 360
+    return round((mean_downhill + 180) % 360)

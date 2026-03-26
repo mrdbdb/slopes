@@ -18,7 +18,7 @@ Requirements:
 import os
 
 from pipeline.constants import SMOOTH_LEVELS, SMOOTH_POINTS, UI_DATA_DIR
-from pipeline.cache import load_profiles, save_profiles, dem_path_for
+from pipeline.cache import load_profiles, save_profiles, dem_path_for, load_bearing, save_bearing
 from pipeline.dem import (
     download_dem, download_dem_copernicus, download_dem_swisstopo, download_dem_gsi,
     compute_face_slope_raster, sample_face_slopes,
@@ -26,7 +26,7 @@ from pipeline.dem import (
 from pipeline.osm import fetch_runs, stitch_runs, fetch_spotlio_supplement, fetch_lifts
 from pipeline.profile import (
     interpolate_run, profile_area, sample_dem,
-    slope_profile, face_steepest_30m,
+    slope_profile, face_steepest_30m, dominant_run_bearing,
 )
 from pipeline.export import export_for_ui, export_geo_json, export_lifts_geo_json, build_figure
 
@@ -98,7 +98,6 @@ RESORTS = [
         "color":            "crimson",
         "dem_source":       "swisstopo",
         "dem_resolution_m": 2,
-        "default_bearing":  0,
     },
     {
         "name":             "Niseko United",
@@ -107,7 +106,6 @@ RESORTS = [
         "color":            "deepskyblue",
         "dem_source":       "gsi",
         "dem_resolution_m": 5,
-        "default_bearing":  0,
     },
     {
         "name":             "Hakuba Valley",
@@ -116,7 +114,6 @@ RESORTS = [
         "color":            "mediumslateblue",
         "dem_source":       "gsi",
         "dem_resolution_m": 5,
-        "default_bearing":  0,
     },
     {
         "name":             "Gala Yuzawa",
@@ -125,7 +122,6 @@ RESORTS = [
         "color":            "mediumseagreen",
         "dem_source":       "gsi",
         "dem_resolution_m": 5,
-        "default_bearing":  0,
     },
     {
         "name":             "Shiga Kogen",
@@ -134,7 +130,6 @@ RESORTS = [
         "color":            "darkorchid",
         "dem_source":       "gsi",
         "dem_resolution_m": 5,
-        "default_bearing":  0,
     },
 ]
 
@@ -272,10 +267,29 @@ def main():
         else:
             print(f"  Lifts cached: {lifts_out}")
 
-    # 6. UI JSON
+        # 6. Dominant bearing from run geometry + DEM
+        cached_bearing = load_bearing(name)
+        if cached_bearing is not None:
+            resort["default_bearing"] = cached_bearing
+            print(f"  Bearing (cached): {cached_bearing}°")
+        else:
+            if raw_samples is None:
+                print("  Sampling DEM for bearing computation …", flush=True)
+                raw_samples = _sample_raw(runs, tif, spacing_m)
+            bearing = dominant_run_bearing(raw_samples)
+            save_bearing(name, bearing)
+            resort["default_bearing"] = bearing
+            print(f"  Dominant run bearing: {bearing}°")
+
+    # 7. UI JSON — ensure every resort has a bearing before export
+    for r in RESORTS:
+        if "default_bearing" not in r:
+            b = load_bearing(r["name"])
+            if b is not None:
+                r["default_bearing"] = b
     export_for_ui(all_results_by_smooth, RESORTS)
 
-    # 7. Static chart (only when exactly 2 resorts)
+    # 8. Static chart (only when exactly 2 resorts)
     if len(resorts) != 2:
         return
     fig = build_figure(all_results_by_smooth[SMOOTH_POINTS], resorts)
