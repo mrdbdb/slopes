@@ -284,10 +284,11 @@ export default function MapApp() {
                 key={`${run.name}-${i}`}
                 data-run={run.name}
                 className={`flex items-center gap-2 px-3 cursor-pointer transition-all ${
-                  isPinned ? "py-2.5" : "py-1.5"
+                  isPinned ? "py-2.5" : "py-2 md:py-1.5"
                 }`}
                 style={{
                   background: isPinned ? "#fef9c3" : isHovered ? "#f3f4f6" : undefined,
+                  touchAction: "manipulation",
                 }}
                 onMouseEnter={() => setHovered(run.name)}
                 onMouseLeave={() => setHovered(null)}

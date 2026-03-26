@@ -338,6 +338,20 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
         ))
       })}
 
+      {/* Wider transparent hit zones for easier tap on mobile */}
+      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map((run, i) => (
+        <Polyline
+          key={`${run.name}-hit-${i}`}
+          positions={run.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{ color: "#000", weight: 20, opacity: 0.001 }}
+          eventHandlers={{
+            mouseover: () => onHover(run.name),
+            mouseout:  () => onHover(null),
+            click:     () => onRunClick(run.name),
+          }}
+        />
+      ))}
+
       {/* Run name label for hovered or pinned run (not dimmed) */}
       {labelRuns
         .filter(r => (r.name === hovered || r.name === pinned) && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label)))
