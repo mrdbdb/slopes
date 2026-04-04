@@ -112,6 +112,7 @@ export default function MapApp() {
   const [mobilePanel, setMobilePanel] = useState<"list" | "filters" | "settings" | null>(null)
   const [bearing, setBearing]         = useState(180)
   const [showLocation, setShowLocation] = useState(false)
+  const [mapMode, setMapMode] = useState<"posted" | "segmented">("segmented")
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null)
 
   useEffect(() => {
@@ -134,6 +135,7 @@ export default function MapApp() {
       if (prefs.hiddenTiers?.length) setHiddenTiers(new Set(prefs.hiddenTiers))
       if (typeof prefs.useFace      === "boolean") setUseFace(prefs.useFace)
       if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
+      if (prefs.mapMode === "posted" || prefs.mapMode === "segmented") setMapMode(prefs.mapMode)
     } catch {}
   }, [])
 
@@ -179,9 +181,10 @@ export default function MapApp() {
         useFace,
         bearings,
         showLocation,
+        mapMode,
       }))
     } catch {}
-  }, [hiddenTiers, useFace, bearing, showLocation, mounted, slug])
+  }, [hiddenTiers, useFace, bearing, showLocation, mapMode, mounted, slug])
 
   function toggleTier(label: string) {
     setHiddenTiers(prev => {
@@ -344,6 +347,25 @@ export default function MapApp() {
 
   const settingsContent = (
     <div className="flex items-center gap-2">
+      <div className="flex gap-0.5">
+        {(["Posted", "Segmented"] as const).map(mode => {
+          const val = mode.toLowerCase() as "posted" | "segmented"
+          return (
+            <button
+              key={mode}
+              onClick={() => setMapMode(val)}
+              className="px-2 py-0.5 rounded text-xs font-medium border transition-colors"
+              style={
+                mapMode === val
+                  ? { background: "#1f2937", color: "#fff", borderColor: "#1f2937" }
+                  : { color: "#aaa", borderColor: "#ddd" }
+              }
+            >
+              {mode}
+            </button>
+          )
+        })}
+      </div>
       <div className="flex gap-0.5">
         {(["Face", "Line"] as const).map(mode => (
           <button
@@ -538,6 +560,7 @@ export default function MapApp() {
             chartHoverCoord={chartHoverCoord}
             bearing={bearing}
             userLocation={userLocation}
+            mapMode={mapMode}
           />
           {/* Slope profile chart overlay */}
           {effectivePin && mounted && (() => {

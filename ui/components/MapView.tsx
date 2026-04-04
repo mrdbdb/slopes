@@ -47,6 +47,7 @@ interface Props {
   chartHoverCoord?: [number, number] | null  // [lon, lat]
   bearing?: number
   userLocation?: { lat: number; lon: number; accuracy: number } | null
+  mapMode?: "posted" | "segmented"
 }
 
 function slopeColor(deg: number): string {
@@ -226,9 +227,21 @@ function FitBounds({ runs }: { runs: RunGeo[] }) {
   return null
 }
 
+function osmDifficultyColor(difficulty?: string): string {
+  switch (difficulty) {
+    case "novice":
+    case "easy":         return "#22c55e"
+    case "intermediate": return "#3b82f6"
+    case "advanced":     return "#1f2937"
+    case "expert":       return "#1f2937"
+    case "freeride":     return "#f97316"
+    default:             return "#9ca3af"
+  }
+}
+
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented" }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -276,7 +289,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
         const isDimmed  = hiddenTiers?.has(tierFor(effectiveSteepest(run)).label) ?? false
-        const color = isDimmed ? DIM_COLOR : slopeColor(effectiveSteepest(run))
+        const color = isDimmed ? DIM_COLOR : mapMode === "posted" ? osmDifficultyColor(run.osm_difficulty) : slopeColor(effectiveSteepest(run))
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
           <Polygon
@@ -319,6 +332,26 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map(run => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
+        if (mapMode === "posted") {
+          const color = osmDifficultyColor(run.osm_difficulty)
+          const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
+          return (
+            <Polyline
+              key={`${run.name}-posted`}
+              positions={positions}
+              pathOptions={{
+                color,
+                weight:  isPinned ? 8 : isHovered ? 6.5 : 4.5,
+                opacity: isPinned ? 1 : isHovered ? 0.95 : 0.85,
+              }}
+              eventHandlers={{
+                mouseover: () => onHover(run.name),
+                mouseout:  () => onHover(null),
+                click:     () => onRunClick(run.name),
+              }}
+            />
+          )
+        }
         const rawSlopes = useFace ? run.slopes : (run.line_slopes ?? run.slopes)
         const maxSeg    = Math.max(...rawSlopes)
         const effective = effectiveSteepest(run)
