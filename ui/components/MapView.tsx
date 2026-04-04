@@ -319,7 +319,11 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map(run => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
-        const slopes    = useFace ? run.slopes : (run.line_slopes ?? run.slopes)
+        const rawSlopes = useFace ? run.slopes : (run.line_slopes ?? run.slopes)
+        const maxSeg    = Math.max(...rawSlopes)
+        const effective = effectiveSteepest(run)
+        const scale     = maxSeg > 0 && effective > maxSeg ? effective / maxSeg : 1
+        const slopes    = scale > 1 ? rawSlopes.map(s => s * scale) : rawSlopes
         return buildGroups(run.coordinates, slopes).map((g, gi) => (
           <Polyline
             key={`${run.name}-${gi}`}
