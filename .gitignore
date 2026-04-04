@@ -7,3 +7,4 @@ image.png
 .claude/
 ui/node_modules/
 ui/.next/
+.next/
