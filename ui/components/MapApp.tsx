@@ -113,6 +113,7 @@ export default function MapApp() {
   const [bearing, setBearing]         = useState(180)
   const [showLocation, setShowLocation] = useState(false)
   const [mapMode, setMapMode] = useState<"posted" | "segmented">("segmented")
+  const [showPostedBg, setShowPostedBg] = useState(false)
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null)
   const [locationOffScreen, setLocationOffScreen] = useState(false)
   const [centerOnLocation, setCenterOnLocation] = useState(0)
@@ -138,6 +139,7 @@ export default function MapApp() {
       if (typeof prefs.useFace      === "boolean") setUseFace(prefs.useFace)
       if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
       if (prefs.mapMode === "posted" || prefs.mapMode === "segmented") setMapMode(prefs.mapMode)
+      if (typeof prefs.showPostedBg === "boolean") setShowPostedBg(prefs.showPostedBg)
     } catch {}
   }, [])
 
@@ -184,9 +186,10 @@ export default function MapApp() {
         bearings,
         showLocation,
         mapMode,
+        showPostedBg,
       }))
     } catch {}
-  }, [hiddenTiers, useFace, bearing, showLocation, mapMode, mounted, slug])
+  }, [hiddenTiers, useFace, bearing, showLocation, mapMode, showPostedBg, mounted, slug])
 
   function toggleTier(label: string) {
     setHiddenTiers(prev => {
@@ -368,6 +371,20 @@ export default function MapApp() {
           )
         })}
       </div>
+      {mapMode === "segmented" && (
+        <button
+          onClick={() => setShowPostedBg(p => !p)}
+          className="px-2 py-0.5 rounded text-xs font-medium border transition-colors"
+          style={
+            showPostedBg
+              ? { background: "#1f2937", color: "#fff", borderColor: "#1f2937" }
+              : { color: "#aaa", borderColor: "#ddd" }
+          }
+          title="Show posted difficulty behind segments"
+        >
+          Rating
+        </button>
+      )}
       <div className="flex gap-0.5">
         {(["Face", "Line"] as const).map(mode => (
           <button
@@ -563,6 +580,7 @@ export default function MapApp() {
             bearing={bearing}
             userLocation={userLocation}
             mapMode={mapMode}
+            showPostedBg={showPostedBg}
             onLocationOffScreen={setLocationOffScreen}
             centerOnLocation={centerOnLocation}
           />

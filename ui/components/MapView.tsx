@@ -48,6 +48,7 @@ interface Props {
   bearing?: number
   userLocation?: { lat: number; lon: number; accuracy: number } | null
   mapMode?: "posted" | "segmented"
+  showPostedBg?: boolean
   onLocationOffScreen?: (offScreen: boolean) => void
   centerOnLocation?: number  // increment to trigger centering
 }
@@ -269,7 +270,7 @@ function LocationBoundsTracker({ userLocation, onLocationOffScreen }: { userLoca
 
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented", onLocationOffScreen, centerOnLocation }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented", showPostedBg = false, onLocationOffScreen, centerOnLocation }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -354,6 +355,20 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
               mouseout:  () => onHover(null),
               click:     () => onRunClick(run.name),
             }}
+          />
+        )
+      })}
+
+      {/* Posted difficulty background — wider, lighter line behind segmented colors */}
+      {mapMode === "segmented" && showPostedBg && runs.filter(r => !r.is_area && r.osm_difficulty && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map((run, i) => {
+        const color = osmDifficultyColor(run.osm_difficulty)
+        const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
+        return (
+          <Polyline
+            key={`${run.name}-bg-${i}`}
+            positions={positions}
+            pathOptions={{ color, weight: 12, opacity: 0.3 }}
+            interactive={false}
           />
         )
       })}
