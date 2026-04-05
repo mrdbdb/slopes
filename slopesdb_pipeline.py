@@ -23,7 +23,7 @@ from pipeline.dem import (
     download_dem, download_dem_copernicus, download_dem_swisstopo, download_dem_gsi,
     compute_face_slope_raster, sample_face_slopes,
 )
-from pipeline.osm import fetch_runs, stitch_runs, fetch_spotlio_supplement, fetch_lifts
+from pipeline.osm import fetch_runs, stitch_runs, fetch_spotlio_supplement, load_gpx_supplement, fetch_lifts
 from pipeline.profile import (
     interpolate_run, profile_area, sample_dem,
     slope_profile, face_steepest_30m, dominant_run_bearing,
@@ -215,6 +215,9 @@ def main():
         if resort.get("spotlio_uuid"):
             extra = fetch_spotlio_supplement(name, resort["spotlio_uuid"], runs)
             runs  = runs + extra
+
+        gpx_extra = load_gpx_supplement(name, runs)
+        runs = runs + gpx_extra
 
         # 3. Slope profiles (per smoothing level)
         raw_samples = None

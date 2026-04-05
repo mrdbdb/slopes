@@ -235,12 +235,15 @@ The pipeline is split into modules under `pipeline/`:
 | `pipeline/constants.py` | Shared tuning constants and external URLs |
 | `pipeline/cache.py` | JSON cache and DEM path helpers |
 | `pipeline/dem.py` | DEM download (USGS 3DEP, Copernicus, swissALTI3D) and sampling |
-| `pipeline/osm.py` | Overpass fetching, Spotlio supplement, run/lift stitching |
+| `pipeline/osm.py` | Overpass fetching, Spotlio supplement, GPX supplement, run/lift stitching |
 | `pipeline/profile.py` | Geometry utilities and slope-profile computation |
 | `pipeline/export.py` | UI JSON, GeoJSON map data, lift export, static chart |
 | `slopesdb_pipeline.py` | `RESORTS` config + `main()` entry point |
 
 ## Change log
+
+### 2026-04-05
+- **GPX supplement for runs missing from OSM:** New `load_gpx_supplement()` in `pipeline/osm.py` loads manually-defined runs from `cache/{Resort}_gpx.json`. Same format as Spotlio supplement (id, name, osm_difficulty, coords). Used to add First Cutoff and Second Cutoff at Sunshine Village — shortcut runs off Banff Avenue that aren't yet mapped in OpenStreetMap. Coordinates extracted from a recorded GPX track and downsampled to ~20m spacing. GPX supplement files live in `data/` (not `cache/`) since they are curated, not auto-generated.
 
 ### 2026-03-25
 - **Fix Laax classification (green runs pushed to Expert):** Two root causes identified and fixed:

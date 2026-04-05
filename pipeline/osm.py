@@ -121,6 +121,25 @@ def fetch_spotlio_supplement(resort_name: str, uuid: str, osm_runs: list[dict]) 
     return supplement
 
 
+# ── GPX supplement ───────────────────────────────────────────────────────────
+
+def load_gpx_supplement(resort_name: str, osm_runs: list[dict]) -> list[dict]:
+    """Load GPX-derived runs that are missing from osm_runs."""
+    import json, os
+    path = os.path.join("data", f"{resort_name.replace(' ', '_')}_gpx.json")
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        items = json.load(f)
+    osm_norm = {_norm_name(r["name"]) for r in osm_runs}
+    supplement = [r for r in items if _norm_name(r["name"]) not in osm_norm]
+    for r in supplement:
+        r["coords"] = [tuple(c) for c in r["coords"]]
+    if supplement:
+        print(f"  GPX supplement: {len(supplement)} runs added")
+    return supplement
+
+
 # ── Run stitching ─────────────────────────────────────────────────────────────
 
 def _min_endpoint_dist(w1: dict, w2: dict) -> float:
