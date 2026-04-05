@@ -367,7 +367,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
           <Polyline
             key={`${run.name}-bg-${i}`}
             positions={positions}
-            pathOptions={{ color, weight: 12, opacity: 0.22 }}
+            pathOptions={{ color, weight: 14, opacity: 0.3 }}
             interactive={false}
           />
         )
