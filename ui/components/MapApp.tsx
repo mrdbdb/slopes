@@ -114,6 +114,8 @@ export default function MapApp() {
   const [showLocation, setShowLocation] = useState(false)
   const [mapMode, setMapMode] = useState<"posted" | "segmented">("segmented")
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null)
+  const [locationOffScreen, setLocationOffScreen] = useState(false)
+  const [centerOnLocation, setCenterOnLocation] = useState(0)
 
   useEffect(() => {
     if (urlSlug) setSlug(urlSlug)
@@ -561,7 +563,29 @@ export default function MapApp() {
             bearing={bearing}
             userLocation={userLocation}
             mapMode={mapMode}
+            onLocationOffScreen={setLocationOffScreen}
+            centerOnLocation={centerOnLocation}
           />
+          {/* Re-center on GPS location button */}
+          {showLocation && userLocation && locationOffScreen && (
+            <button
+              onClick={() => setCenterOnLocation(c => c + 1)}
+              className="absolute top-3 right-3 z-[1000] bg-white rounded-full shadow-lg border border-gray-200 p-2 text-blue-500 hover:text-blue-600 transition-colors"
+              title="Center on my location"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <circle cx="10" cy="10" r="4" />
+                <line x1="10" y1="1" x2="10" y2="5" />
+                <line x1="10" y1="15" x2="10" y2="19" />
+                <line x1="1" y1="10" x2="5" y2="10" />
+                <line x1="15" y1="10" x2="19" y2="10" />
+                <polyline points="10,1 12,4 8,4" fill="currentColor" stroke="none" />
+                <polyline points="10,19 12,16 8,16" fill="currentColor" stroke="none" />
+                <polyline points="1,10 4,12 4,8" fill="currentColor" stroke="none" />
+                <polyline points="19,10 16,12 16,8" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+          )}
           {/* Slope profile chart overlay */}
           {effectivePin && mounted && (() => {
             const segments   = runs.filter(r => r.name === effectivePin)

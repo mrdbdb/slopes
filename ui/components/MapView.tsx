@@ -48,6 +48,8 @@ interface Props {
   bearing?: number
   userLocation?: { lat: number; lon: number; accuracy: number } | null
   mapMode?: "posted" | "segmented"
+  onLocationOffScreen?: (offScreen: boolean) => void
+  centerOnLocation?: number  // increment to trigger centering
 }
 
 function slopeColor(deg: number): string {
@@ -239,9 +241,35 @@ function osmDifficultyColor(difficulty?: string): string {
   }
 }
 
+function CenterOnLocation({ userLocation, trigger }: { userLocation: { lat: number; lon: number } | null | undefined; trigger?: number }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!trigger || !userLocation) return
+    map.panTo([userLocation.lat, userLocation.lon])
+  }, [trigger, userLocation, map])
+  return null
+}
+
+function LocationBoundsTracker({ userLocation, onLocationOffScreen }: { userLocation: { lat: number; lon: number; accuracy: number } | null | undefined; onLocationOffScreen?: (offScreen: boolean) => void }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!userLocation || !onLocationOffScreen) return
+    function check() {
+      if (!userLocation) return
+      const inBounds = map.getBounds().contains([userLocation.lat, userLocation.lon])
+      onLocationOffScreen!(!inBounds)
+    }
+    check()
+    map.on("moveend", check)
+    map.on("zoomend", check)
+    return () => { map.off("moveend", check); map.off("zoomend", check) }
+  }, [map, userLocation, onLocationOffScreen])
+  return null
+}
+
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented" }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented", onLocationOffScreen, centerOnLocation }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -268,6 +296,8 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       <SetBearing bearing={bearing} />
       <FitBounds runs={runs} />
       <FocusRun runs={runs} focusRun={focusRun} />
+      <LocationBoundsTracker userLocation={userLocation} onLocationOffScreen={onLocationOffScreen} />
+      <CenterOnLocation userLocation={userLocation} trigger={centerOnLocation} />
 
       {/* Lifts — dashed lines */}
       {lifts.map((lift, i) => (
