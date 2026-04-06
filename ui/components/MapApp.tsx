@@ -667,11 +667,20 @@ export default function MapApp() {
                         strokeDasharray={t.min === 36 ? "3 3" : t.min === 27 ? "4 2" : "2 2"}
                       />
                     ))}
+                    <defs>
+                      <linearGradient id="slopeGrad" x1="0" y1="0" x2="1" y2="0">
+                        {profile.map((pt, i) => {
+                          const pct = totalKm > 0 ? (pt.dist / totalKm) * 100 : 0
+                          const c = tierFor(pt.slope).color
+                          return <stop key={i} offset={`${pct}%`} stopColor={c} />
+                        })}
+                      </linearGradient>
+                    </defs>
                     <Area
                       type="monotone"
                       dataKey="slope"
-                      stroke={tier.color}
-                      fill={tier.color}
+                      stroke="url(#slopeGrad)"
+                      fill="url(#slopeGrad)"
                       fillOpacity={0.35}
                       strokeWidth={1.5}
                       isAnimationActive={false}
