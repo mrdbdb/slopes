@@ -1,6 +1,6 @@
 "use client"
 
-import { ResortData, tierFor, TIERS } from "@/lib/types"
+import { ResortData, postedTier, TIERS } from "@/lib/types"
 import RunRow from "./RunRow"
 
 interface Props {
@@ -24,7 +24,7 @@ export default function ResortColumn({ data, filterTier, highlighted, onHover, o
   const visible = data.runs.filter(run => {
     if (run === null) return true
     if (!filterTier) return true
-    return tierFor(run.steepest).label === filterTier
+    return postedTier(run).label === filterTier
   })
 
   // Drop separators that are now adjacent or at the start/end

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import dynamic from "next/dynamic"
-import { TIERS, tierFor, effectiveSteepest } from "@/lib/types"
+import { TIERS, tierFor, effectiveSteepest, postedTier } from "@/lib/types"
 import type { RunGeo, LiftGeo } from "@/components/MapView"
 import { PisteBadge } from "@/components/RunRow"
 import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts"
@@ -252,7 +252,7 @@ export default function MapApp() {
   }
 
   const pinnedRunData  = pinnedRun ? runs.find(r => r.name === pinnedRun) : undefined
-  const effectivePin   = pinnedRunData && hiddenTiers.has(tierFor(effectiveSteepest(pinnedRunData)).label) ? null : pinnedRun
+  const effectivePin   = pinnedRunData && hiddenTiers.has(postedTier(pinnedRunData).label) ? null : pinnedRun
 
 
   const uniqueRuns = Array.from(
@@ -266,7 +266,7 @@ export default function MapApp() {
   const grouped = TIERS.map(tier => ({
     tier,
     runs: uniqueRuns.filter(r =>
-      tierFor(effectiveSteepest(r)).label === tier.label &&
+      postedTier(r).label === tier.label &&
       !hiddenTiers.has(tier.label)
     ),
   })).filter(g => g.runs.length > 0)

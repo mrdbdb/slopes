@@ -8,7 +8,7 @@ import "leaflet/dist/leaflet.css"
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore – no types for leaflet-rotate
 import "leaflet-rotate"
-import { TIERS, tierFor, effectiveSteepest } from "@/lib/types"
+import { TIERS, tierFor, effectiveSteepest, postedTier } from "@/lib/types"
 
 declare module "leaflet" {
   interface Map { setBearing(deg: number): this }
@@ -172,7 +172,7 @@ function RunLabels({ runs, hovered, pinned, bearing, hiddenTiers }: { runs: RunG
       {runs.map(run => {
         if (run.is_area) return null
         if (run.name === hovered || run.name === pinned) return null
-        if (hiddenTiers?.has(tierFor(effectiveSteepest(run)).label)) return null
+        if (hiddenTiers?.has(postedTier(run).label)) return null
         const position = runMid(run.coordinates)
         const angle    = runAngleDeg(run.coordinates, bearing)
         return (
@@ -319,7 +319,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       {runs.filter(r => r.is_area).map((run, i) => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
-        const isDimmed  = hiddenTiers?.has(tierFor(effectiveSteepest(run)).label) ?? false
+        const isDimmed  = hiddenTiers?.has(postedTier(run).label) ?? false
         const color = isDimmed ? DIM_COLOR : mapMode === "posted" ? osmDifficultyColor(run.osm_difficulty) : slopeColor(effectiveSteepest(run))
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
@@ -343,7 +343,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Dimmed line runs — tier-hidden or delta-filtered, rendered before active */}
-      {runs.filter(r => !r.is_area && (hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map((run, di) => {
+      {runs.filter(r => !r.is_area && (hiddenTiers?.has(postedTier(r).label) ?? false)).map((run, di) => {
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
           <Polyline
@@ -360,7 +360,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Posted difficulty background — wider, lighter line behind segmented colors */}
-      {mapMode === "segmented" && showPostedBg && runs.filter(r => !r.is_area && r.osm_difficulty && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map((run, i) => {
+      {mapMode === "segmented" && showPostedBg && runs.filter(r => !r.is_area && r.osm_difficulty && !(hiddenTiers?.has(postedTier(r).label) ?? false)).map((run, i) => {
         const color = osmDifficultyColor(run.osm_difficulty)
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
@@ -374,7 +374,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Active line runs — rendered after dimmed so they appear on top */}
-      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map(run => {
+      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(postedTier(r).label) ?? false)).map(run => {
         const isPinned  = pinned  === run.name
         const isHovered = hovered === run.name
         if (mapMode === "posted") {
@@ -421,7 +421,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       })}
 
       {/* Wider transparent hit zones for easier tap on mobile */}
-      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label) ?? false)).map((run, i) => (
+      {runs.filter(r => !r.is_area && !(hiddenTiers?.has(postedTier(r).label) ?? false)).map((run, i) => (
         <Polyline
           key={`${run.name}-hit-${i}`}
           positions={run.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
@@ -436,7 +436,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
 
       {/* Run name label for hovered or pinned run (not dimmed) */}
       {labelRuns
-        .filter(r => (r.name === hovered || r.name === pinned) && !(hiddenTiers?.has(tierFor(effectiveSteepest(r)).label)))
+        .filter(r => (r.name === hovered || r.name === pinned) && !(hiddenTiers?.has(postedTier(r).label)))
         .map(run => (
           <Marker
             key={`label-${run.name}`}

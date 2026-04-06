@@ -31,12 +31,18 @@ export function tierFor(deg: number) {
   return TIERS.find(t => deg >= t.min) ?? TIERS[TIERS.length - 1]
 }
 
-const OSM_DIFFICULTY_FLOOR: Record<string, number> = {
+export const OSM_DIFFICULTY_FLOOR: Record<string, number> = {
   easy:         0,
   intermediate: 18,
   advanced:     27,
   expert:       36,
   freeride:     36,
+}
+
+/** Tier based on the posted (OSM) difficulty, falling back to measured steepness. */
+export function postedTier(run: { steepest: number; face_steepest?: number; is_traverse?: boolean; is_area?: boolean; osm_difficulty?: string }) {
+  const floor = OSM_DIFFICULTY_FLOOR[run.osm_difficulty ?? '']
+  return tierFor(floor != null ? floor : effectiveSteepest(run))
 }
 
 export function effectiveSteepest(run: { steepest: number; face_steepest?: number; is_traverse?: boolean; is_area?: boolean; osm_difficulty?: string }): number {
