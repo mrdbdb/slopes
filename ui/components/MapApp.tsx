@@ -107,7 +107,7 @@ export default function MapApp() {
   const [pinnedRun, setPinnedRun]     = useState<string | null>(null)
   const [mounted, setMounted]         = useState(false)
   const [hiddenTiers, setHiddenTiers]         = useState<Set<string>>(new Set())
-  const [chartHoverCoord, setChartHoverCoord] = useState<[number, number] | null>(null)
+  const [chartHoverCoord, setChartHoverCoord] = useState<[number, number, number] | null>(null) // [lon, lat, slope]
   const [useFace, setUseFace]                 = useState(true)
   const [mobilePanel, setMobilePanel] = useState<"list" | "filters" | "settings" | null>(null)
   const [bearing, setBearing]         = useState(180)
@@ -631,7 +631,7 @@ export default function MapApp() {
                     margin={{ top: 2, right: 4, bottom: 0, left: 0 }}
                     onMouseMove={(state: any) => {
                       const pt = state?.activePayload?.[0]?.payload
-                      if (pt) setChartHoverCoord([pt.lon, pt.lat])
+                      if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
                     }}
                     onMouseLeave={() => setChartHoverCoord(null)}
                   >

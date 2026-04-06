@@ -44,7 +44,7 @@ interface Props {
   focusRun: string | null
   hiddenTiers?: Set<string>
   useFace?: boolean
-  chartHoverCoord?: [number, number] | null  // [lon, lat]
+  chartHoverCoord?: [number, number, number] | null  // [lon, lat, slope]
   bearing?: number
   userLocation?: { lat: number; lon: number; accuracy: number } | null
   mapMode?: "posted" | "segmented"
@@ -448,14 +448,25 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
       }
 
       {/* Chart hover position marker */}
-      {chartHoverCoord && (
-        <CircleMarker
-          center={[chartHoverCoord[1], chartHoverCoord[0]]}
-          radius={6}
-          pathOptions={{ color: "#fff", weight: 2, fillColor: "#1e293b", fillOpacity: 1 }}
-          interactive={false}
-        />
-      )}
+      {chartHoverCoord && (() => {
+        const tierColor = tierFor(chartHoverCoord[2]).color
+        return (
+          <>
+            <CircleMarker
+              center={[chartHoverCoord[1], chartHoverCoord[0]]}
+              radius={14}
+              pathOptions={{ color: tierColor, weight: 2, fillColor: tierColor, fillOpacity: 0.2 }}
+              interactive={false}
+            />
+            <CircleMarker
+              center={[chartHoverCoord[1], chartHoverCoord[0]]}
+              radius={7}
+              pathOptions={{ color: "#fff", weight: 2.5, fillColor: tierColor, fillOpacity: 1 }}
+              interactive={false}
+            />
+          </>
+        )
+      })()}
 
       {/* User location */}
       {userLocation && (
