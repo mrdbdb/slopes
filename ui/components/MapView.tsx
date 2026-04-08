@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { MapContainer, TileLayer, Polyline, Polygon, Marker, Circle, CircleMarker, useMap, useMapEvents } from "react-leaflet"
 import type { LatLngBoundsExpression } from "leaflet"
 import L from "leaflet"
@@ -51,6 +51,9 @@ interface Props {
   showPostedBg?: boolean
   onLocationOffScreen?: (offScreen: boolean) => void
   centerOnLocation?: number  // increment to trigger centering
+  initialCenter?: [number, number] | null  // [lat, lng]
+  initialZoom?: number | null
+  onViewportChange?: (center: [number, number], zoom: number) => void
 }
 
 function slopeColor(deg: number): string {
@@ -251,6 +254,38 @@ function CenterOnLocation({ userLocation, trigger }: { userLocation: { lat: numb
   return null
 }
 
+function ViewportTracker({ onViewportChange }: { onViewportChange?: (center: [number, number], zoom: number) => void }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!onViewportChange) return
+    function handler() {
+      const c = map.getCenter()
+      onViewportChange!([c.lat, c.lng], map.getZoom())
+    }
+    map.on("moveend", handler)
+    return () => { map.off("moveend", handler) }
+  }, [map, onViewportChange])
+  return null
+}
+
+function RestoreViewport({ center, zoom }: { center?: [number, number] | null; zoom?: number | null }) {
+  const map = useMap()
+  const restored = useRef(false)
+  useEffect(() => {
+    if (restored.current) return
+    if (!center && zoom == null) return
+    restored.current = true
+    if (center && zoom != null) {
+      map.setView(center, zoom, { animate: false })
+    } else if (center) {
+      map.setView(center, map.getZoom(), { animate: false })
+    } else if (zoom != null) {
+      map.setZoom(zoom, { animate: false })
+    }
+  }, [center, zoom, map])
+  return null
+}
+
 function LocationBoundsTracker({ userLocation, onLocationOffScreen }: { userLocation: { lat: number; lon: number; accuracy: number } | null | undefined; onLocationOffScreen?: (offScreen: boolean) => void }) {
   const map = useMap()
   useEffect(() => {
@@ -270,7 +305,7 @@ function LocationBoundsTracker({ userLocation, onLocationOffScreen }: { userLoca
 
 const DIM_COLOR = "#d1d5db"
 
-export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented", showPostedBg = false, onLocationOffScreen, centerOnLocation }: Props) {
+export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented", showPostedBg = false, onLocationOffScreen, centerOnLocation, initialCenter, initialZoom, onViewportChange }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
   const labelRuns = Array.from(
     runs.reduce((map, r) => {
@@ -295,8 +330,9 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
         opacity={0.25}
       />
       <SetBearing bearing={bearing} />
-      <FitBounds runs={runs} />
+      {initialCenter ? <RestoreViewport center={initialCenter} zoom={initialZoom} /> : <FitBounds runs={runs} />}
       <FocusRun runs={runs} focusRun={focusRun} />
+      <ViewportTracker onViewportChange={onViewportChange} />
       <LocationBoundsTracker userLocation={userLocation} onLocationOffScreen={onLocationOffScreen} />
       <CenterOnLocation userLocation={userLocation} trigger={centerOnLocation} />
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import dynamic from "next/dynamic"
@@ -117,6 +117,7 @@ export default function MapApp() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null)
   const [locationOffScreen, setLocationOffScreen] = useState(false)
   const [centerOnLocation, setCenterOnLocation] = useState(0)
+  const [savedViewport, setSavedViewport] = useState<{ center: [number, number]; zoom: number } | null>(null)
 
   useEffect(() => {
     if (urlSlug) setSlug(urlSlug)
@@ -130,9 +131,10 @@ export default function MapApp() {
         setResorts(data)
       })
     try {
+      let savedSlug: string | null = null
       if (!urlSlug) {
-        const saved = localStorage.getItem("ski-map-slug")
-        if (saved) setSlug(saved)
+        savedSlug = localStorage.getItem("ski-map-slug")
+        if (savedSlug) setSlug(savedSlug)
       }
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length) setHiddenTiers(new Set(prefs.hiddenTiers))
@@ -140,12 +142,20 @@ export default function MapApp() {
       if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
       if (prefs.mapMode === "posted" || prefs.mapMode === "segmented") setMapMode(prefs.mapMode)
       if (typeof prefs.showPostedBg === "boolean") setShowPostedBg(prefs.showPostedBg)
+      const targetSlug = urlSlug || savedSlug || "palisades_tahoe"
+      const vp = prefs.viewports?.[targetSlug]
+      if (vp?.center && vp?.zoom != null) setSavedViewport(vp)
     } catch {}
   }, [])
 
   useEffect(() => {
     if (!mounted) return
     try { localStorage.setItem("ski-map-slug", slug) } catch {}
+    try {
+      const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
+      const vp = prefs.viewports?.[slug]
+      setSavedViewport(vp?.center && vp?.zoom != null ? vp : null)
+    } catch {}
   }, [slug, mounted])
 
   useEffect(() => {
@@ -251,8 +261,19 @@ export default function MapApp() {
     setMobilePanel(null)
   }
 
+  const handleViewportChange = useCallback((center: [number, number], zoom: number) => {
+    try {
+      const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
+      const viewports = { ...(prefs.viewports ?? {}), [slug]: { center, zoom } }
+      localStorage.setItem("ski-prefs", JSON.stringify({ ...prefs, viewports }))
+    } catch {}
+  }, [slug])
+
   const pinnedRunData  = pinnedRun ? runs.find(r => r.name === pinnedRun) : undefined
   const effectivePin   = pinnedRunData && hiddenTiers.has(postedTier(pinnedRunData).label) ? null : pinnedRun
+
+  // Clear chart hover marker when pinned run changes
+  useEffect(() => { setChartHoverCoord(null) }, [effectivePin])
 
 
   const uniqueRuns = Array.from(
@@ -583,6 +604,9 @@ export default function MapApp() {
             showPostedBg={showPostedBg}
             onLocationOffScreen={setLocationOffScreen}
             centerOnLocation={centerOnLocation}
+            initialCenter={savedViewport?.center}
+            initialZoom={savedViewport?.zoom}
+            onViewportChange={handleViewportChange}
           />
           {/* Re-center on GPS location button */}
           {showLocation && userLocation && locationOffScreen && (
@@ -633,7 +657,6 @@ export default function MapApp() {
                       const pt = state?.activePayload?.[0]?.payload
                       if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
                     }}
-                    onMouseLeave={() => setChartHoverCoord(null)}
                   >
                     <XAxis
                       dataKey="dist"
