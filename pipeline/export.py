@@ -378,21 +378,16 @@ def export_geo_json(resort: dict, runs_meta: list, raw_samples: list,
         coord_pts = [pts_s[i] for i in indices] + [pts_s[-1]]
         coords    = [[round(lon, 6), round(lat, 6)] for lat, lon in coord_pts]
 
-        # Derive steepest from the actual geo segments so the header value
-        # matches what the user sees on the map and profile chart.
-        geo_steepest = max(seg_line_slopes) if seg_line_slopes else steepest
-        geo_face     = max(seg_slopes)      if seg_slopes      else face_steep
-
         props = {
             "name":           run_name,
-            "steepest":       round(geo_steepest, 1),
+            "steepest":       round(steepest, 1),
             "osm_id":         osm_id,
             "osm_difficulty": osm_difficulty,
             "slopes":         seg_slopes,
             "line_slopes":    seg_line_slopes,
         }
         if face_steep is not None:
-            props["face_steepest"] = round(geo_face if geo_face is not None else face_steep, 1)
+            props["face_steepest"] = round(face_steep, 1)
             props["is_traverse"]   = is_traverse
 
         features.append({
