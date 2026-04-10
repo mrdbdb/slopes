@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ResortData, RunProfile, TIERS, tierFor, effectiveSteepest } from "@/lib/types"
+import { fetchData } from "@/lib/dataFetch"
 import RunRow from "@/components/RunRow"
 
 interface ResortMeta { name: string; slug: string; color: string }
@@ -25,7 +26,7 @@ function useResortData(slug: string, smoothing: number) {
   useEffect(() => {
     if (!slug) return
     setData(null)
-    fetch(`/data/${slug}_s${smoothing}.json`)
+    fetchData(`/data/${slug}_s${smoothing}.json`)
       .then(r => r.json())
       .then(setData)
       .catch(console.error)
@@ -46,7 +47,7 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true)
-    fetch("/data/index.json").then(r => r.json()).then(setAllResorts).catch(console.error)
+    fetchData("/data/index.json").then(r => r.json()).then(setAllResorts).catch(console.error)
     try {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length)  setHiddenTiers(new Set(prefs.hiddenTiers))

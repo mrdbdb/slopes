@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { TIERS, tierFor, effectiveSteepest, postedTier } from "@/lib/types"
+import { fetchData } from "@/lib/dataFetch"
 import type { RunGeo, LiftGeo } from "@/components/MapView"
 import { PisteBadge } from "@/components/RunRow"
 import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts"
@@ -136,11 +137,11 @@ export default function MapApp() {
 
   useEffect(() => {
     setMounted(true)
-    fetch("/data/index.json", { cache: "no-cache" })
-      .catch(() => fetch("/data/index.json", { cache: "force-cache" }))
+    fetchData("/data/index.json")
       .then(r => r.json()).then((data: ResortMeta[]) => {
         setResorts(data)
       })
+      .catch(() => {})
     try {
       let savedSlug: string | null = null
       if (!urlSlug) {
@@ -227,8 +228,8 @@ export default function MapApp() {
     setRuns([])
     setLifts([])
     Promise.all([
-      fetch(`/data/${slug}_geo.json`).then(r => r.json()),
-      fetch(`/data/${slug}_lifts.json`).then(r => r.json()).catch(() => ({ features: [] })),
+      fetchData(`/data/${slug}_geo.json`).then(r => r.json()),
+      fetchData(`/data/${slug}_lifts.json`).then(r => r.json()).catch(() => ({ features: [] })),
     ]).then(([geo, liftsJson]) => {
       if (cancelled) return
       const parsed: RunGeo[] = (geo as GeoJSON).features.map(f => ({
