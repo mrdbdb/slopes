@@ -76,12 +76,23 @@ function disambiguateRuns(runs: RunGeo[], thresholdKm = 1): RunGeo[] {
 function buildProfile(segments: RunGeo[], useFace: boolean): { dist: number; slope: number; lon: number; lat: number }[] {
   const points: { dist: number; slope: number; lon: number; lat: number }[] = []
   let cumDist = 0
+  // Apply the same scaling MapView uses so segment colors match between chart and map.
+  // MapView scales each run's slopes by effectiveSteepest / max(slopes) when the raw
+  // max under-reports (over-smoothed geo segments). Mirror that here.
+  const scaleFor = (seg: RunGeo): number => {
+    const raw = useFace ? seg.slopes : (seg.line_slopes ?? seg.slopes)
+    if (!raw || raw.length === 0) return 1
+    const maxSeg = Math.max(...raw)
+    const effective = effectiveSteepest(seg)
+    return maxSeg > 0 && effective > maxSeg ? effective / maxSeg : 1
+  }
   for (const seg of segments) {
     const { coordinates } = seg
-    const slopes = useFace ? seg.slopes : (seg.line_slopes ?? seg.slopes)
-    for (let i = 0; i < slopes.length; i++) {
+    const rawSlopes = useFace ? seg.slopes : (seg.line_slopes ?? seg.slopes)
+    const scale = scaleFor(seg)
+    for (let i = 0; i < rawSlopes.length; i++) {
       const [lon, lat] = coordinates[i]
-      points.push({ dist: parseFloat(cumDist.toFixed(3)), slope: Math.max(0, slopes[i]), lon, lat })
+      points.push({ dist: parseFloat(cumDist.toFixed(3)), slope: Math.max(0, rawSlopes[i] * scale), lon, lat })
       cumDist += haversineKm(coordinates[i], coordinates[i + 1])
     }
   }
