@@ -37,6 +37,7 @@ import matplotlib.pyplot as plt
 RESORTS = [
     {
         "name":             "Palisades Tahoe",
+        "region":           "California",
         "osm_bbox":         "(39.15,-120.30,39.27,-120.17)",
         "dem_bbox":         (-120.30, 39.15, -120.17, 39.27),
         "color":            "steelblue",
@@ -44,6 +45,7 @@ RESORTS = [
     },
     {
         "name":             "Northstar",
+        "region":           "California",
         "osm_bbox":         "(39.23,-120.16,39.30,-120.09)",
         "dem_bbox":         (-120.16, 39.23, -120.09, 39.30),
         "color":            "forestgreen",
@@ -51,6 +53,7 @@ RESORTS = [
     },
     {
         "name":             "Sugar Bowl",
+        "region":           "California",
         "osm_bbox":         "(39.28,-120.38,39.33,-120.32)",
         "dem_bbox":         (-120.38, 39.28, -120.32, 39.33),
         "color":            "darkorange",
@@ -58,6 +61,7 @@ RESORTS = [
     },
     {
         "name":             "Mount Norquay",
+        "region":           "Canada",
         "osm_bbox":         "(51.19,-115.63,51.23,-115.56)",
         "dem_bbox":         (-115.63, 51.19, -115.56, 51.23),
         "color":            "royalblue",
@@ -67,6 +71,7 @@ RESORTS = [
     },
     {
         "name":             "Sunshine Village",
+        "region":           "Canada",
         "osm_bbox":         "(51.05,-115.82,51.12,-115.73)",
         "dem_bbox":         (-115.82, 51.05, -115.73, 51.12),
         "color":            "goldenrod",
@@ -76,6 +81,7 @@ RESORTS = [
     },
     {
         "name":             "Lake Louise",
+        "region":           "Canada",
         "osm_bbox":         "(51.40,-116.22,51.47,-116.09)",
         "dem_bbox":         (-116.22, 51.40, -116.09, 51.47),
         "color":            "mediumorchid",
@@ -85,6 +91,7 @@ RESORTS = [
     },
     {
         "name":             "Whistler Blackcomb",
+        "region":           "Canada",
         "osm_bbox":         "(50.04,-123.00,50.15,-122.85)",
         "dem_bbox":         (-123.00, 50.04, -122.85, 50.15),
         "color":            "teal",
@@ -92,7 +99,48 @@ RESORTS = [
         "dem_resolution_m": 30,
     },
     {
+        "name":             "Vail",
+        "region":           "Colorado",
+        "osm_bbox":         "(39.56,-106.44,39.67,-106.29)",
+        "dem_bbox":         (-106.44, 39.56, -106.29, 39.67),
+        "color":            "indianred",
+        "dem_resolution_m": 2,
+    },
+    {
+        "name":             "Beaver Creek",
+        "region":           "Colorado",
+        "osm_bbox":         "(39.54,-106.57,39.63,-106.45)",
+        "dem_bbox":         (-106.57, 39.54, -106.45, 39.63),
+        "color":            "saddlebrown",
+        "dem_resolution_m": 2,
+    },
+    {
+        "name":             "Breckenridge",
+        "region":           "Colorado",
+        "osm_bbox":         "(39.44,-106.13,39.52,-106.01)",
+        "dem_bbox":         (-106.13, 39.44, -106.01, 39.52),
+        "color":            "darkgoldenrod",
+        "dem_resolution_m": 2,
+    },
+    {
+        "name":             "Keystone",
+        "region":           "Colorado",
+        "osm_bbox":         "(39.57,-106.00,39.66,-105.87)",
+        "dem_bbox":         (-106.00, 39.57, -105.87, 39.66),
+        "color":            "seagreen",
+        "dem_resolution_m": 2,
+    },
+    {
+        "name":             "Crested Butte",
+        "region":           "Colorado",
+        "osm_bbox":         "(38.86,-107.02,38.92,-106.93)",
+        "dem_bbox":         (-107.02, 38.86, -106.93, 38.92),
+        "color":            "darkviolet",
+        "dem_resolution_m": 2,
+    },
+    {
         "name":             "Laax",
+        "region":           "Switzerland",
         "osm_bbox":         "(46.79,9.08,46.90,9.30)",
         "dem_bbox":         (9.08, 46.79, 9.30, 46.90),
         "color":            "crimson",
@@ -101,6 +149,7 @@ RESORTS = [
     },
     {
         "name":             "Niseko United",
+        "region":           "Japan",
         "osm_bbox":         "(42.77,140.63,42.88,140.82)",
         "dem_bbox":         (140.63, 42.77, 140.82, 42.88),
         "color":            "deepskyblue",
@@ -109,6 +158,7 @@ RESORTS = [
     },
     {
         "name":             "Hakuba Valley",
+        "region":           "Japan",
         "osm_bbox":         "(36.61,137.81,36.78,137.93)",
         "dem_bbox":         (137.81, 36.61, 137.93, 36.78),
         "color":            "mediumslateblue",
@@ -117,6 +167,7 @@ RESORTS = [
     },
     {
         "name":             "Gala Yuzawa",
+        "region":           "Japan",
         "osm_bbox":         "(36.90,138.79,36.96,138.87)",
         "dem_bbox":         (138.79, 36.90, 138.87, 36.96),
         "color":            "mediumseagreen",
@@ -125,6 +176,7 @@ RESORTS = [
     },
     {
         "name":             "Shiga Kogen",
+        "region":           "Japan",
         "osm_bbox":         "(36.68,138.38,36.83,138.60)",
         "dem_bbox":         (138.38, 36.68, 138.60, 36.83),
         "color":            "darkorchid",

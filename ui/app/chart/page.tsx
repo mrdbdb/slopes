@@ -6,7 +6,27 @@ import { ResortData, RunProfile, TIERS, tierFor, effectiveSteepest } from "@/lib
 import { fetchData } from "@/lib/dataFetch"
 import RunRow from "@/components/RunRow"
 
-interface ResortMeta { name: string; slug: string; color: string }
+interface ResortMeta { name: string; slug: string; color: string; region?: string }
+
+const REGION_ORDER = ["California", "Canada", "Colorado", "Japan", "Switzerland"]
+
+function groupByRegion(resorts: ResortMeta[]): [string, ResortMeta[]][] {
+  const groups = new Map<string, ResortMeta[]>()
+  for (const r of resorts) {
+    const region = r.region ?? "Other"
+    if (!groups.has(region)) groups.set(region, [])
+    groups.get(region)!.push(r)
+  }
+  const ordered: [string, ResortMeta[]][] = []
+  for (const region of REGION_ORDER) {
+    const items = groups.get(region)
+    if (items) ordered.push([region, items])
+  }
+  for (const [region, items] of groups) {
+    if (!REGION_ORDER.includes(region)) ordered.push([region, items])
+  }
+  return ordered
+}
 
 function groupByTierAndDeg(data: ResortData): Record<string, Record<number, RunProfile[]>> {
   const groups: Record<string, Record<number, RunProfile[]>> = {}
@@ -198,8 +218,12 @@ export default function Home() {
               onChange={e => setSlug(e.target.value)}
               className="text-sm font-bold text-gray-800 bg-transparent border-none outline-none cursor-pointer"
             >
-              {allResorts.map(r => (
-                <option key={r.slug} value={r.slug}>{r.name}</option>
+              {groupByRegion(allResorts).map(([region, items]) => (
+                <optgroup key={region} label={region}>
+                  {items.map(r => (
+                    <option key={r.slug} value={r.slug}>{r.name}</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
             {data && (

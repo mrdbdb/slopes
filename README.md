@@ -173,14 +173,23 @@ Remaining discrepancies come from:
 
 ## Resorts
 
-Currently configured: **Palisades Tahoe**, **Northstar**, **Sugar Bowl**, **Mount Norquay**, **Sunshine Village**, **Lake Louise**, **Whistler Blackcomb**, **Laax**, and **Niseko United**.
+Currently configured, grouped by region:
 
-To add a resort, add an entry to `RESORTS` in `slopesdb_pipeline.py`:
+- **California** — Palisades Tahoe, Northstar, Sugar Bowl
+- **Canada** — Mount Norquay, Sunshine Village, Lake Louise, Whistler Blackcomb
+- **Colorado** (Epic) — Vail, Beaver Creek, Breckenridge, Keystone, Crested Butte
+- **Japan** — Niseko United, Hakuba Valley, Gala Yuzawa, Shiga Kogen
+- **Switzerland** — Laax
+
+The resort selector in the UI (both map and chart pages) is grouped by region via `<optgroup>` using the `region` field exported into `index.json`. Regions without an entry in `REGION_ORDER` (`ui/components/MapApp.tsx` / `ui/app/chart/page.tsx`) are appended in insertion order.
+
+To add a resort, add an entry to `RESORTS` in `slopesdb_pipeline.py` — the `region` field drives the grouping in the UI:
 
 US resort (USGS 3DEP 2m DEM):
 ```python
 {
     "name":             "Mammoth Mountain",
+    "region":           "California",
     "osm_bbox":         "(37.61,-119.04,37.66,-119.00)",
     "dem_bbox":         (-119.04, 37.61, -119.00, 37.66),
     "color":            "darkorange",
@@ -241,6 +250,9 @@ The pipeline is split into modules under `pipeline/`:
 | `slopesdb_pipeline.py` | `RESORTS` config + `main()` entry point |
 
 ## Change log
+
+### 2026-04-11
+- **Add Epic Colorado resorts and group the resort selector by region.** Added `Vail`, `Beaver Creek`, `Breckenridge`, `Keystone`, and `Crested Butte` to `RESORTS` in `slopesdb_pipeline.py` (all US resorts, so they use USGS 3DEP 2m DEM with no extra config). Every resort now carries a `region` field (`California`, `Canada`, `Colorado`, `Japan`, `Switzerland`); `pipeline/export.py` writes it into `ui/public/data/index.json`. Both the map page (`ui/components/MapApp.tsx`) and the comparison page (`ui/app/chart/page.tsx`) now render the resort selector as `<optgroup>` sections, ordered California → Canada → Colorado → Japan → Switzerland, with any unknown region appended at the end. To populate slope data for the new Colorado resorts, run `python3 slopesdb_pipeline.py --resort Vail` (and similar) — DEM and OSM downloads require network access to `elevation.nationalmap.gov` and the Overpass API, which was not available from the sandbox where this change was authored.
 
 ### 2026-03-25
 - **Fix Laax classification (green runs pushed to Expert):** Two root causes identified and fixed:

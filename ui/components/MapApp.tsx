@@ -12,7 +12,27 @@ import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tool
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false })
 
-interface ResortMeta { name: string; slug: string; color: string; default_bearing?: number }
+interface ResortMeta { name: string; slug: string; color: string; region?: string; default_bearing?: number }
+
+const REGION_ORDER = ["California", "Canada", "Colorado", "Japan", "Switzerland"]
+
+function groupByRegion(resorts: ResortMeta[]): [string, ResortMeta[]][] {
+  const groups = new Map<string, ResortMeta[]>()
+  for (const r of resorts) {
+    const region = r.region ?? "Other"
+    if (!groups.has(region)) groups.set(region, [])
+    groups.get(region)!.push(r)
+  }
+  const ordered: [string, ResortMeta[]][] = []
+  for (const region of REGION_ORDER) {
+    const items = groups.get(region)
+    if (items) ordered.push([region, items])
+  }
+  for (const [region, items] of groups) {
+    if (!REGION_ORDER.includes(region)) ordered.push([region, items])
+  }
+  return ordered
+}
 
 interface GeoJSON {
   resort: string
@@ -461,8 +481,12 @@ export default function MapApp() {
           onChange={e => router.push("/" + e.target.value)}
           className="px-2 py-0.5 border border-gray-200 rounded text-sm font-bold text-gray-800 focus:outline-none focus:border-gray-400"
         >
-          {resorts.map(r => (
-            <option key={r.slug} value={r.slug}>{r.name}</option>
+          {groupByRegion(resorts).map(([region, items]) => (
+            <optgroup key={region} label={region}>
+              {items.map(r => (
+                <option key={r.slug} value={r.slug}>{r.name}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
 

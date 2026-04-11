@@ -172,6 +172,7 @@ def export_for_ui(all_results_by_smooth: dict, resorts: list) -> None:
     index = [
         {"name": r["name"], "slug": r["name"].lower().replace(" ", "_"),
          "color": r["color"], "smooth_levels": SMOOTH_LEVELS,
+         "region": r.get("region", "Other"),
          "default_bearing": r.get("default_bearing", 180)}
         for r in resorts
     ]
