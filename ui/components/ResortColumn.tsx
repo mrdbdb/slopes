@@ -54,7 +54,6 @@ export default function ResortColumn({ data, filterTier, highlighted, onHover, o
             <RunRow
               key={run.name}
               run={run}
-              accentColor={data.color}
               highlighted={highlighted === run.name}
               onHover={onHover}
               onClick={onClick}

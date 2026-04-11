@@ -8,7 +8,7 @@ import { TIERS, tierFor, effectiveSteepest, postedTier } from "@/lib/types"
 import { fetchData } from "@/lib/dataFetch"
 import type { RunGeo, LiftGeo } from "@/components/MapView"
 import { PisteBadge } from "@/components/RunRow"
-import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts"
+import SlopeProfileChart from "@/components/SlopeProfileChart"
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false })
 
@@ -688,90 +688,17 @@ export default function MapApp() {
                   )}
                   <span className="text-xs text-gray-400">{totalKm.toFixed(2)} km</span>
                 </div>
-                <div
-                  onPointerMove={e => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                    const target = frac * totalKm
-                    let best = 0
-                    for (let i = 1; i < profile.length; i++) {
-                      if (Math.abs(profile[i].dist - target) < Math.abs(profile[best].dist - target)) best = i
-                    }
-                    const pt = profile[best]
-                    if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
-                  }}
-                  onPointerDown={e => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                    const target = frac * totalKm
-                    let best = 0
-                    for (let i = 1; i < profile.length; i++) {
-                      if (Math.abs(profile[i].dist - target) < Math.abs(profile[best].dist - target)) best = i
-                    }
-                    const pt = profile[best]
-                    if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
-                  }}
-                >
-                <ResponsiveContainer width="100%" height={70}>
-                  <AreaChart
-                    data={profile}
-                    margin={{ top: 2, right: 4, bottom: 0, left: 0 }}
-                  >
-                    <XAxis
-                      dataKey="dist"
-                      type="number"
-                      domain={[0, totalKm]}
-                      tickFormatter={v => `${(v as number).toFixed(1)}`}
-                      tick={{ fontSize: 9, fill: "#9ca3af" }}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <YAxis domain={[0, 55]} hide />
-                    <Tooltip
-                      cursor={{ stroke: "#94a3b8", strokeWidth: 1, strokeDasharray: "3 3" }}
-                      isAnimationActive={false}
-                      content={({ active, payload }) => {
-                        if (!active || !payload?.length) return null
-                        const slope = payload[0]?.value as number
-                        const t = tierFor(slope)
-                        return (
-                          <div className="text-xs font-bold px-1.5 py-0.5 rounded shadow-sm bg-white border border-gray-200" style={{ color: t.color }}>
-                            {slope.toFixed(1)}°
-                          </div>
-                        )
-                      }}
-                    />
-                    {TIERS.filter(t => t.min > 0).map(t => (
-                      <ReferenceLine
-                        key={t.min}
-                        y={t.min}
-                        stroke={t.color}
-                        strokeWidth={0.8}
-                        strokeDasharray={t.min === 36 ? "3 3" : t.min === 27 ? "4 2" : "2 2"}
-                      />
-                    ))}
-                    <defs>
-                      <linearGradient id="slopeGrad" x1="0" y1="0" x2="1" y2="0">
-                        {profile.map((pt, i) => {
-                          const pct = totalKm > 0 ? (pt.dist / totalKm) * 100 : 0
-                          const c = tierFor(pt.slope).color
-                          return <stop key={i} offset={`${pct}%`} stopColor={c} />
-                        })}
-                      </linearGradient>
-                    </defs>
-                    <Area
-                      type="monotone"
-                      dataKey="slope"
-                      stroke="url(#slopeGrad)"
-                      fill="url(#slopeGrad)"
-                      fillOpacity={0.35}
-                      strokeWidth={1.5}
-                      isAnimationActive={false}
-                      dot={false}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-                </div>
+                <SlopeProfileChart
+                  profile={profile}
+                  maxDist={totalKm}
+                  height={70}
+                  mounted={mounted}
+                  showAxis
+                  showTooltip
+                  fillOpacity={0.35}
+                  strokeWidth={1.5}
+                  onScrub={pt => setChartHoverCoord([pt.lon, pt.lat, pt.slope])}
+                />
               </div>
             )
           })()}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ResortData, RunProfile, TIERS, tierFor, effectiveSteepest } from "@/lib/types"
 import { fetchData } from "@/lib/dataFetch"
+import { loadResortFromGeo } from "@/lib/loadResort"
 import RunRow from "@/components/RunRow"
 
 interface ResortMeta { name: string; slug: string; color: string; region?: string }
@@ -41,16 +42,13 @@ function groupByTierAndDeg(data: ResortData): Record<string, Record<number, RunP
   return groups
 }
 
-function useResortData(slug: string, smoothing: number) {
+function useResortData(slug: string) {
   const [data, setData] = useState<ResortData | null>(null)
   useEffect(() => {
     if (!slug) return
     setData(null)
-    fetchData(`/data/${slug}_s${smoothing}.json`)
-      .then(r => r.json())
-      .then(setData)
-      .catch(console.error)
-  }, [slug, smoothing])
+    loadResortFromGeo(slug).then(setData).catch(console.error)
+  }, [slug])
   return data
 }
 
@@ -60,7 +58,6 @@ export default function Home() {
   const [rightSlug, setRightSlug]     = useState("northstar")
   const [hiddenTiers, setHiddenTiers] = useState<Set<string>>(new Set())
   const [maxLengthInput, setMaxLengthInput] = useState("")
-  const [smoothing, setSmoothing]     = useState(30)
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const [clicked, setClicked]         = useState<string | null>(null)
   const [mounted, setMounted]         = useState(false)
@@ -72,7 +69,6 @@ export default function Home() {
       const prefs = JSON.parse(localStorage.getItem("ski-prefs") ?? "{}")
       if (prefs.hiddenTiers?.length)  setHiddenTiers(new Set(prefs.hiddenTiers))
       if (prefs.maxLengthInput)       setMaxLengthInput(prefs.maxLengthInput)
-      if ([2, 10, 30].includes(prefs.smoothing)) setSmoothing(prefs.smoothing)
       if (prefs.leftSlug)             setLeftSlug(prefs.leftSlug)
       if (prefs.rightSlug)            setRightSlug(prefs.rightSlug)
     } catch {}
@@ -84,15 +80,14 @@ export default function Home() {
       localStorage.setItem("ski-prefs", JSON.stringify({
         hiddenTiers: Array.from(hiddenTiers),
         maxLengthInput,
-        smoothing,
         leftSlug,
         rightSlug,
       }))
     } catch {}
-  }, [hiddenTiers, maxLengthInput, smoothing, leftSlug, rightSlug, mounted])
+  }, [hiddenTiers, maxLengthInput, leftSlug, rightSlug, mounted])
 
-  const leftData  = useResortData(leftSlug,  smoothing)
-  const rightData = useResortData(rightSlug, smoothing)
+  const leftData  = useResortData(leftSlug)
+  const rightData = useResortData(rightSlug)
 
   const maxLengthKm = maxLengthInput ? parseFloat(maxLengthInput) : null
 
@@ -173,20 +168,6 @@ export default function Home() {
               </button>
             )
           })}
-        </div>
-
-        <div className="flex items-center gap-1.5 text-xs text-gray-500">
-          <label htmlFor="smoothing" className="whitespace-nowrap">Smoothing</label>
-          <select
-            id="smoothing"
-            value={smoothing}
-            onChange={e => setSmoothing(Number(e.target.value))}
-            className="px-1.5 py-0.5 border border-gray-200 rounded text-xs text-gray-700 focus:outline-none focus:border-gray-400"
-          >
-            <option value={2}>2m (raw)</option>
-            <option value={10}>10m</option>
-            <option value={30}>30m (SteepSeeker)</option>
-          </select>
         </div>
 
         <div className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -273,14 +254,12 @@ export default function Home() {
                 <div key={deg} className="flex divide-x divide-gray-100">
                   {columns.map((col, i) => {
                     const runs = degMaps[i][deg] ?? []
-                    const resort = col.data!
                     return (
                       <div key={col.slug} className="flex-1 min-w-0">
                         {runs.map(run => (
                           <RunRow
                             key={`${run.osm_id ?? run.name}-${run.steepest}-${run.name}`}
                             run={truncateRun(run)}
-                            accentColor={resort.color}
                             highlighted={activeHighlight === run.name}
                             onHover={setHighlighted}
                             onClick={handleClick}

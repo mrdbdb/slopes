@@ -1,7 +1,7 @@
 "use client"
 
-import { AreaChart, Area, XAxis, YAxis, ReferenceLine, ResponsiveContainer } from "recharts"
-import { RunProfile, tierFor, effectiveSteepest, TIERS } from "@/lib/types"
+import { RunProfile, tierFor, effectiveSteepest } from "@/lib/types"
+import SlopeProfileChart from "./SlopeProfileChart"
 
 export function PisteBadge({ difficulty }: { difficulty: string }) {
   switch (difficulty) {
@@ -44,7 +44,6 @@ export function PisteBadge({ difficulty }: { difficulty: string }) {
 
 interface Props {
   run: RunProfile
-  accentColor: string
   highlighted: boolean
   onHover: (name: string | null) => void
   onClick: (name: string) => void
@@ -52,7 +51,7 @@ interface Props {
   mounted: boolean
 }
 
-export default function RunRow({ run, accentColor, highlighted, onHover, onClick, maxDist, mounted }: Props) {
+export default function RunRow({ run, highlighted, onHover, onClick, maxDist, mounted }: Props) {
   const tier = tierFor(effectiveSteepest(run))
   const data = run.profile.map(([dist, slope]) => ({ dist, slope: Math.max(0, slope) }))
 
@@ -88,33 +87,14 @@ export default function RunRow({ run, accentColor, highlighted, onHover, onClick
 
       {/* Slope profile chart */}
       <div className="flex-1" style={{ height: 40 }}>
-        {mounted && (
-          <ResponsiveContainer width="100%" height={40}>
-            <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-              <XAxis dataKey="dist" type="number" domain={[0, maxDist]} hide />
-              <YAxis domain={[0, 50]} hide />
-              {TIERS.filter(t => t.min > 0).map(t => (
-                <ReferenceLine
-                  key={t.min}
-                  y={t.min}
-                  stroke={t.color}
-                  strokeWidth={0.8}
-                  strokeDasharray={t.min === 36 ? "3 3" : t.min === 27 ? "4 2" : "2 2"}
-                />
-              ))}
-              <Area
-                type="monotone"
-                dataKey="slope"
-                stroke={accentColor}
-                fill={accentColor}
-                fillOpacity={highlighted ? 0.6 : 0.4}
-                strokeWidth={highlighted ? 1.2 : 0.8}
-                isAnimationActive={false}
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
+        <SlopeProfileChart
+          profile={data}
+          maxDist={maxDist}
+          height={40}
+          mounted={mounted}
+          fillOpacity={highlighted ? 0.55 : 0.35}
+          strokeWidth={highlighted ? 1.5 : 1}
+        />
       </div>
 
       {/* Length */}
