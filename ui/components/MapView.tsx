@@ -233,6 +233,19 @@ function FitBounds({ runs }: { runs: RunGeo[] }) {
   return null
 }
 
+function PinnedBgPane() {
+  const map = useMap()
+  useEffect(() => {
+    if (!map.getPane("pinnedBg")) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rotatePane = (map as any)._rotatePane as HTMLElement | undefined
+      const pane = map.createPane("pinnedBg", rotatePane)
+      pane.style.zIndex = "390"  // below overlayPane (400), above tilePane (200)
+    }
+  }, [map])
+  return null
+}
+
 function osmDifficultyColor(difficulty?: string): string {
   switch (difficulty) {
     case "novice":
@@ -335,6 +348,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
         opacity={0.25}
       />
       <SetBearing bearing={bearing} />
+      <PinnedBgPane />
       {initialCenter ? <RestoreViewport center={initialCenter} zoom={initialZoom} /> : <FitBounds runs={runs} />}
       <FocusRun runs={runs} focusRun={focusRun} />
       <ViewportTracker onViewportChange={onViewportChange} />
@@ -415,6 +429,7 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
               color,
               weight:  isPinned ? 22   : 14,
               opacity: isPinned ? 0.75 : 0.3,
+              pane:    "pinnedBg",
             }}
             interactive={false}
           />
