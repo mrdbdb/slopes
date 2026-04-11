@@ -23,6 +23,9 @@ function groupByRegion(resorts: ResortMeta[]): [string, ResortMeta[]][] {
     if (!groups.has(region)) groups.set(region, [])
     groups.get(region)!.push(r)
   }
+  for (const items of groups.values()) {
+    items.sort((a, b) => a.name.localeCompare(b.name))
+  }
   const ordered: [string, ResortMeta[]][] = []
   for (const region of REGION_ORDER) {
     const items = groups.get(region)
@@ -685,14 +688,34 @@ export default function MapApp() {
                   )}
                   <span className="text-xs text-gray-400">{totalKm.toFixed(2)} km</span>
                 </div>
+                <div
+                  onPointerMove={e => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    const target = frac * totalKm
+                    let best = 0
+                    for (let i = 1; i < profile.length; i++) {
+                      if (Math.abs(profile[i].dist - target) < Math.abs(profile[best].dist - target)) best = i
+                    }
+                    const pt = profile[best]
+                    if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
+                  }}
+                  onPointerDown={e => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    const target = frac * totalKm
+                    let best = 0
+                    for (let i = 1; i < profile.length; i++) {
+                      if (Math.abs(profile[i].dist - target) < Math.abs(profile[best].dist - target)) best = i
+                    }
+                    const pt = profile[best]
+                    if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
+                  }}
+                >
                 <ResponsiveContainer width="100%" height={70}>
                   <AreaChart
                     data={profile}
                     margin={{ top: 2, right: 4, bottom: 0, left: 0 }}
-                    onMouseMove={(state: any) => {
-                      const pt = state?.activePayload?.[0]?.payload
-                      if (pt) setChartHoverCoord([pt.lon, pt.lat, pt.slope])
-                    }}
                   >
                     <XAxis
                       dataKey="dist"
@@ -706,6 +729,7 @@ export default function MapApp() {
                     <YAxis domain={[0, 55]} hide />
                     <Tooltip
                       cursor={{ stroke: "#94a3b8", strokeWidth: 1, strokeDasharray: "3 3" }}
+                      isAnimationActive={false}
                       content={({ active, payload }) => {
                         if (!active || !payload?.length) return null
                         const slope = payload[0]?.value as number
@@ -747,6 +771,7 @@ export default function MapApp() {
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+                </div>
               </div>
             )
           })()}

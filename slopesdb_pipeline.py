@@ -23,7 +23,10 @@ from pipeline.dem import (
     download_dem, download_dem_copernicus, download_dem_swisstopo, download_dem_gsi,
     compute_face_slope_raster, sample_face_slopes,
 )
-from pipeline.osm import fetch_runs, stitch_runs, fetch_spotlio_supplement, fetch_lifts
+from pipeline.osm import (
+    fetch_runs, stitch_runs, fetch_spotlio_supplement, fetch_lifts,
+    bbox_from_runs, overpass_bbox_string,
+)
 from pipeline.profile import (
     interpolate_run, profile_area, sample_dem,
     slope_profile, face_steepest_30m, dominant_run_bearing,
@@ -38,6 +41,10 @@ RESORTS = [
     {
         "name":             "Palisades Tahoe",
         "region":           "California",
+        # OSM polygon #6704136 ("Palisades Tahoe Alpine Meadows") is mislabeled
+        # — it only covers the Alpine Meadows side, so auto-discovery would
+        # silently lose every Palisades run. Keep the manual bbox until OSM is
+        # corrected (or until we map a Palisades-specific override).
         "osm_bbox":         "(39.15,-120.30,39.27,-120.17)",
         "dem_bbox":         (-120.30, 39.15, -120.17, 39.27),
         "color":            "steelblue",
@@ -250,25 +257,37 @@ def main():
         spacing_m = resort["dem_resolution_m"]
         print(f"\n▶ {name}")
 
-        # 1. DEM
+        # 1. Runs from OSM. Fetched before the DEM so dem_bbox/osm_bbox can be
+        #    auto-derived from the returned geometry when the resort config
+        #    omits them (the systematic resort-discovery path).
+        print("  Fetching runs from OSM …", flush=True)
+        runs = fetch_runs(resort)
+        print(f"  {len(runs)} ways found")
+        runs = stitch_runs(runs)
+        print(f"  {len(runs)} runs after stitching")
+
+        # Auto-derive bboxes from run coords if not configured. Both formats
+        # are populated so downstream consumers (DEM, lift fetcher) keep
+        # working unchanged.
+        if "dem_bbox" not in resort or "osm_bbox" not in resort:
+            derived = bbox_from_runs(runs)
+            resort.setdefault("dem_bbox", derived)
+            resort.setdefault("osm_bbox", overpass_bbox_string(derived))
+            print(f"  Derived bbox from runs: {derived}")
+
+        # 2. DEM
         tif = dem_path_for(name, spacing_m)
         if not os.path.exists(tif):
             _download_dem(resort, tif)
         else:
             print(f"  Using cached DEM: {tif}")
 
-        # 2. Runs from OSM (+ optional Spotlio supplement)
-        print("  Fetching runs from OSM …", flush=True)
-        runs = fetch_runs(name, resort["osm_bbox"])
-        print(f"  {len(runs)} ways found")
-        runs = stitch_runs(runs)
-        print(f"  {len(runs)} runs after stitching")
-
+        # 3. Spotlio supplement (Canadian resorts where Overpass coverage is sparse)
         if resort.get("spotlio_uuid"):
             extra = fetch_spotlio_supplement(name, resort["spotlio_uuid"], runs)
             runs  = runs + extra
 
-        # 3. Slope profiles (per smoothing level)
+        # 4. Slope profiles (per smoothing level)
         raw_samples = None
 
         for s in SMOOTH_LEVELS:
@@ -296,7 +315,7 @@ def main():
 
             all_results_by_smooth[s][name] = results
 
-        # 4. Geo JSON for map view
+        # 5. Geo JSON for map view
         geo_out = os.path.join(UI_DATA_DIR,
                                f"{name.lower().replace(' ', '_')}_geo.json")
         if not os.path.exists(geo_out):
@@ -308,7 +327,7 @@ def main():
         else:
             print(f"  Geo JSON cached: {geo_out}")
 
-        # 5. Lift data
+        # 6. Lift data
         lifts_out = os.path.join(UI_DATA_DIR,
                                  f"{name.lower().replace(' ', '_')}_lifts.json")
         if not os.path.exists(lifts_out):
@@ -319,7 +338,7 @@ def main():
         else:
             print(f"  Lifts cached: {lifts_out}")
 
-        # 6. Dominant bearing from run geometry + DEM
+        # 7. Dominant bearing from run geometry + DEM
         cached_bearing = load_bearing(name)
         if cached_bearing is not None:
             resort["default_bearing"] = cached_bearing
@@ -333,7 +352,7 @@ def main():
             resort["default_bearing"] = bearing
             print(f"  Dominant run bearing: {bearing}°")
 
-    # 7. UI JSON — ensure every resort has a bearing before export
+    # 8. UI JSON — ensure every resort has a bearing before export
     for r in RESORTS:
         if "default_bearing" not in r:
             b = load_bearing(r["name"])
@@ -341,7 +360,7 @@ def main():
                 r["default_bearing"] = b
     export_for_ui(all_results_by_smooth, RESORTS)
 
-    # 8. Static chart (only when exactly 2 resorts)
+    # 9. Static chart (only when exactly 2 resorts)
     if len(resorts) != 2:
         return
     fig = build_figure(all_results_by_smooth[SMOOTH_POINTS], resorts)

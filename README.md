@@ -183,7 +183,43 @@ Currently configured, grouped by region:
 
 The resort selector in the UI (both map and chart pages) is grouped by region via `<optgroup>` using the `region` field exported into `index.json`. Regions without an entry in `REGION_ORDER` (`ui/components/MapApp.tsx` / `ui/app/chart/page.tsx`) are appended in insertion order.
 
-To add a resort, add an entry to `RESORTS` in `slopesdb_pipeline.py` — the `region` field drives the grouping in the UI:
+To add a resort, add an entry to `RESORTS` in `slopesdb_pipeline.py` — the `region` field drives the grouping in the UI.
+
+### Systematic resort lookup (no manual bbox)
+
+For US/EU resorts that are mapped as a `site=piste` relation or a `landuse=winter_sports` polygon in OSM, you can omit `osm_bbox` and `dem_bbox` entirely. The pipeline will:
+
+1. Call `resolve_resort_area(name)` against Overpass to find the matching element (priority: `site=piste` relation → `landuse=winter_sports` area → `leisure=resort` + `sport=skiing` area).
+2. Fetch all `piste:type=downhill` ways scoped to that element (no false positives from neighbouring resorts).
+3. Auto-derive `dem_bbox` from the returned run coordinates with a small padding.
+
+```python
+{
+    "name":             "Vail",
+    "region":           "Colorado",
+    "color":            "indianred",
+    "dem_resolution_m": 2,
+}
+```
+
+To override discovery — for resorts with ambiguous names, missing OSM tags, or multiple candidate polygons — use one of:
+
+```python
+"osm_name_regex":  "Vail Ski Resort"          # custom name regex passed to Overpass
+"osm_area":        {"kind": "relation", "id": 12345}     # piste/site relation id
+"osm_area":        {"kind": "area_rel", "id": 12345}     # any relation → area
+"osm_area":        {"kind": "area_way", "id": 67890}     # any way      → area
+"osm_bbox":        "(39.56,-106.44,39.67,-106.29)"       # legacy bbox fallback
+```
+
+Probe which resorts resolve cleanly before adopting:
+
+```bash
+python3 probe_osm_resorts.py            # all configured resorts
+python3 probe_osm_resorts.py Vail Laax  # filter by name
+```
+
+For full manual control (legacy path), keep both `osm_bbox` and `dem_bbox`:
 
 US resort (USGS 3DEP 2m DEM):
 ```python
@@ -252,6 +288,7 @@ The pipeline is split into modules under `pipeline/`:
 ## Change log
 
 ### 2026-04-11
+- **Systematic OSM resort discovery — drop manual bboxes when possible.** Added `resolve_resort_area()` in `pipeline/osm.py` that queries Overpass for the OSM element representing a resort (priority: `site=piste` relation → `landuse=winter_sports` polygon → `leisure=resort` + `sport=skiing` polygon) and returns either a relation id or an Overpass `area_id`. New `fetch_runs(resort)` dispatcher tries, in order: explicit `osm_area` override → automatic discovery by name (default when `osm_bbox` is absent) → legacy `osm_bbox` fallback. The pipeline main loop now fetches OSM runs *before* downloading the DEM, and auto-derives `dem_bbox`/`osm_bbox` from the returned run coordinates (`bbox_from_runs` + 0.005° padding) when the resort config omits them, so a new resort can be added with just `{name, region, color, dem_resolution_m}`. New `probe_osm_resorts.py` standalone script reports which configured resorts resolve cleanly via discovery so existing bbox configs can be migrated incrementally. Existing resort configs continue to work unchanged — discovery is opt-in via omitting `osm_bbox` (or via `osm_discover: True`).
 - **Add Epic Colorado resorts and group the resort selector by region.** Added `Vail`, `Beaver Creek`, `Breckenridge`, `Keystone`, and `Crested Butte` to `RESORTS` in `slopesdb_pipeline.py` (all US resorts, so they use USGS 3DEP 2m DEM with no extra config). Every resort now carries a `region` field (`California`, `Canada`, `Colorado`, `Japan`, `Switzerland`); `pipeline/export.py` writes it into `ui/public/data/index.json`. Both the map page (`ui/components/MapApp.tsx`) and the comparison page (`ui/app/chart/page.tsx`) now render the resort selector as `<optgroup>` sections, ordered California → Canada → Colorado → Japan → Switzerland, with any unknown region appended at the end. To populate slope data for the new Colorado resorts, run `python3 slopesdb_pipeline.py --resort Vail` (and similar) — DEM and OSM downloads require network access to `elevation.nationalmap.gov` and the Overpass API, which was not available from the sandbox where this change was authored.
 
 ### 2026-03-25

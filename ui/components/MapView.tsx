@@ -308,6 +308,7 @@ function LocationBoundsTracker({ userLocation, onLocationOffScreen }: { userLoca
 }
 
 const DIM_COLOR = "#d1d5db"
+const PIN_COLOR = "#facc15"
 
 export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunClick, focusRun, hiddenTiers, useFace = true, chartHoverCoord, bearing = 180, userLocation, mapMode = "segmented", showPostedBg = false, onLocationOffScreen, centerOnLocation, initialCenter, initialZoom, onViewportChange }: Props) {
   // Deduplicate by name for label placement (pick longest segment)
@@ -399,15 +400,22 @@ export default function MapView({ runs, lifts, hovered, pinned, onHover, onRunCl
         )
       })}
 
-      {/* Posted difficulty background — wider, lighter line behind segmented colors */}
-      {mapMode === "segmented" && showPostedBg && runs.filter(r => !r.is_area && r.osm_difficulty && !(hiddenTiers?.has(postedTier(r).label) ?? false)).map((run, i) => {
-        const color = osmDifficultyColor(run.osm_difficulty)
+      {/* Posted difficulty background — wider, lighter line behind segmented colors.
+          Pinned run always gets a yellow highlight regardless of showPostedBg toggle. */}
+      {mapMode === "segmented" && runs.filter(r => !r.is_area && !(hiddenTiers?.has(postedTier(r).label) ?? false)).map((run, i) => {
+        const isPinned = pinned === run.name
+        if (!isPinned && (!showPostedBg || !run.osm_difficulty)) return null
+        const color = isPinned ? PIN_COLOR : osmDifficultyColor(run.osm_difficulty)
         const positions: [number, number][] = run.coordinates.map(([lon, lat]) => [lat, lon])
         return (
           <Polyline
             key={`${run.name}-bg-${i}`}
             positions={positions}
-            pathOptions={{ color, weight: 14, opacity: 0.3 }}
+            pathOptions={{
+              color,
+              weight:  isPinned ? 22   : 14,
+              opacity: isPinned ? 0.75 : 0.3,
+            }}
             interactive={false}
           />
         )
