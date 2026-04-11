@@ -247,10 +247,14 @@ function osmDifficultyColor(difficulty?: string): string {
 
 function CenterOnLocation({ userLocation, trigger }: { userLocation: { lat: number; lon: number } | null | undefined; trigger?: number }) {
   const map = useMap()
+  const locRef = useRef(userLocation)
+  locRef.current = userLocation
   useEffect(() => {
-    if (!trigger || !userLocation) return
-    map.panTo([userLocation.lat, userLocation.lon])
-  }, [trigger, userLocation, map])
+    if (!trigger) return
+    const loc = locRef.current
+    if (!loc) return
+    map.panTo([loc.lat, loc.lon])
+  }, [trigger, map])
   return null
 }
 
