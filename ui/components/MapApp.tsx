@@ -134,7 +134,7 @@ export default function MapApp() {
   const urlSlug = params?.resort as string | undefined
   const bearingLoadedForSlug = useRef<string | null>(null)
   const [resorts, setResorts]         = useState<ResortMeta[]>([])
-  const [slug, setSlug]               = useState(urlSlug ?? "palisades_tahoe")
+  const [slug, setSlug]               = useState(urlSlug ?? "northstar")
   const [runs, setRuns]               = useState<RunGeo[]>([])
   const [lifts, setLifts]             = useState<LiftGeo[]>([])
   const [loading, setLoading]         = useState(true)
@@ -177,7 +177,7 @@ export default function MapApp() {
       if (typeof prefs.showLocation === "boolean") setShowLocation(prefs.showLocation)
       if (prefs.mapMode === "posted" || prefs.mapMode === "segmented") setMapMode(prefs.mapMode)
       if (typeof prefs.showPostedBg === "boolean") setShowPostedBg(prefs.showPostedBg)
-      const targetSlug = urlSlug || savedSlug || "palisades_tahoe"
+      const targetSlug = urlSlug || savedSlug || "northstar"
       const vp = prefs.viewports?.[targetSlug]
       if (vp?.center && vp?.zoom != null) setSavedViewport(vp)
     } catch {}
