@@ -67,6 +67,14 @@ RESORTS = [
         "dem_resolution_m": 2,
     },
     {
+        "name":             "Heavenly",
+        "region":           "California",
+        "osm_bbox":         "(38.86,-119.98,38.96,-119.87)",
+        "dem_bbox":         (-119.98, 38.86, -119.87, 38.96),
+        "color":            "mediumvioletred",
+        "dem_resolution_m": 2,
+    },
+    {
         "name":             "Mount Norquay",
         "region":           "Canada",
         "osm_bbox":         "(51.19,-115.63,51.23,-115.56)",
