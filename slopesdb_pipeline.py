@@ -75,6 +75,14 @@ RESORTS = [
         "dem_resolution_m": 2,
     },
     {
+        "name":             "Tahoe Donner",
+        "region":           "California",
+        "osm_bbox":         "(39.33,-120.26,39.37,-120.21)",
+        "dem_bbox":         (-120.26, 39.33, -120.21, 39.37),
+        "color":            "peru",
+        "dem_resolution_m": 2,
+    },
+    {
         "name":             "Mount Norquay",
         "region":           "Canada",
         "osm_bbox":         "(51.19,-115.63,51.23,-115.56)",

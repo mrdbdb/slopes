@@ -175,7 +175,7 @@ Remaining discrepancies come from:
 
 Currently configured, grouped by region:
 
-- **California** — Palisades Tahoe, Northstar, Sugar Bowl, Heavenly
+- **California** — Palisades Tahoe, Northstar, Sugar Bowl, Heavenly, Tahoe Donner
 - **Canada** — Mount Norquay, Sunshine Village, Lake Louise, Whistler Blackcomb
 - **Colorado** (Epic) — Vail, Beaver Creek, Breckenridge, Keystone, Crested Butte
 - **Japan** — Niseko United, Hakuba Valley, Gala Yuzawa, Shiga Kogen
@@ -288,7 +288,7 @@ The pipeline is split into modules under `pipeline/`:
 ## Change log
 
 ### 2026-04-12
-- **Add Heavenly to the resort list.** Added `Heavenly` to `RESORTS` in `slopesdb_pipeline.py` under the California region. Heavenly sits on the CA–NV border above South Lake Tahoe; it is a US resort so it uses USGS 3DEP 2m DEM with `osm_bbox="(38.86,-119.98,38.96,-119.87)"` covering both the California and Nevada sides of the mountain. To populate slope data, run `python3 slopesdb_pipeline.py --resort Heavenly` — DEM and OSM downloads require network access to `elevation.nationalmap.gov` and the Overpass API, which was not available from the sandbox where this change was authored.
+- **Add Heavenly and Tahoe Donner to the resort list.** Added `Heavenly` and `Tahoe Donner` to `RESORTS` in `slopesdb_pipeline.py` under the California region. Both are US resorts using USGS 3DEP 2m DEM. Heavenly sits on the CA–NV border above South Lake Tahoe (`osm_bbox="(38.86,-119.98,38.96,-119.87)"`). Tahoe Donner is a small resort near Truckee (`osm_bbox="(39.33,-120.26,39.37,-120.21)"`). To populate slope data, run `python3 slopesdb_pipeline.py --resort Heavenly` and `python3 slopesdb_pipeline.py --resort "Tahoe Donner"` — DEM and OSM downloads require network access.
 
 ### 2026-04-11
 - **Systematic OSM resort discovery — drop manual bboxes when possible.** Added `resolve_resort_area()` in `pipeline/osm.py` that queries Overpass for the OSM element representing a resort (priority: `site=piste` relation → `landuse=winter_sports` polygon → `leisure=resort` + `sport=skiing` polygon) and returns either a relation id or an Overpass `area_id`. New `fetch_runs(resort)` dispatcher tries, in order: explicit `osm_area` override → automatic discovery by name (default when `osm_bbox` is absent) → legacy `osm_bbox` fallback. The pipeline main loop now fetches OSM runs *before* downloading the DEM, and auto-derives `dem_bbox`/`osm_bbox` from the returned run coordinates (`bbox_from_runs` + 0.005° padding) when the resort config omits them, so a new resort can be added with just `{name, region, color, dem_resolution_m}`. New `probe_osm_resorts.py` standalone script reports which configured resorts resolve cleanly via discovery so existing bbox configs can be migrated incrementally. Existing resort configs continue to work unchanged — discovery is opt-in via omitting `osm_bbox` (or via `osm_discover: True`).
